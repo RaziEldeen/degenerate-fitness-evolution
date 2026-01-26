@@ -1823,7 +1823,7 @@ def plot_mutation_std_comparison(
     if save_fig:
         num_iterations = params['num_iterations']
         population_size = params['population_size']
-        base_filename = f"mutation_std_comparison_jax_iter{num_iterations}_pop{population_size}_mut{mutation_std_values[0]:.3f}to{mutation_std_values[-1]:.3f}"
+        base_filename = f"mutation_std_comparison_iter{num_iterations}_pop{population_size}_mut{mutation_std_values[0]:.3f}to{mutation_std_values[-1]:.3f}"
         save_figure(fig, base_filename, format='jpeg')
     
     return fig

@@ -13,10 +13,10 @@ from functools import partial
 from typing import Tuple
 
 
-def create_landscape_jax(Fmax: float, NS: int, NF: int, key: jax.Array, is_toy: bool = False):
+def create_landscape(Fmax: float, NS: int, NF: int, key: jax.Array, is_toy: bool = False):
     """Creates JAX-based functions for the loss, gradient, and Hessian."""
     if is_toy and NS == 1 and NF == 1:
-        return create_jax_landscape_2d(Fmax)
+        return create_landscape_2d(Fmax)
     
     key, λ0_key, Λ_key = jax.random.split(key, 3)
     λ0s = jax.random.uniform(λ0_key, shape=(NS,), minval=0.01, maxval=1.0)
@@ -47,7 +47,7 @@ def create_landscape_jax(Fmax: float, NS: int, NF: int, key: jax.Array, is_toy: 
     return fitness_function, hessian_fn, grad_fn
 
 
-def create_jax_landscape_2d(Fmax=1.0):
+def create_landscape_2d(Fmax=1.0):
     """2D fitness: f(x, y) = Fmax - 0.5 * x^2 * y^2"""
     
     def loss_fn(params):
@@ -66,7 +66,7 @@ def create_jax_landscape_2d(Fmax=1.0):
 # =============================================================================
 
 @jax.jit
-def compute_expected_gradient_jax(mu: jax.Array, cov_matrix: jax.Array) -> jax.Array:
+def compute_expected_gradient(mu: jax.Array, cov_matrix: jax.Array) -> jax.Array:
     """
     Compute the expected gradient ⟨∇f⟩ of the fitness function f(x,y) = f_max - x²y²/2
     under a Gaussian distribution N(μ, Σ).
@@ -94,7 +94,7 @@ def compute_expected_gradient_jax(mu: jax.Array, cov_matrix: jax.Array) -> jax.A
 
 
 @jax.jit
-def compute_expected_hessian_jax(mu: jax.Array, cov_matrix: jax.Array) -> jax.Array:
+def compute_expected_hessian(mu: jax.Array, cov_matrix: jax.Array) -> jax.Array:
     """
     Compute the expected Hessian ⟨H⟩ of the fitness function f(x,y) = f_max - x²y²/2
     under a Gaussian distribution N(μ, Σ).
@@ -124,7 +124,7 @@ def compute_expected_hessian_jax(mu: jax.Array, cov_matrix: jax.Array) -> jax.Ar
 
 
 @jax.jit
-def compute_expected_fitness_jax(mu: jax.Array, cov_matrix: jax.Array, f_max: float = 5.0) -> jax.Array:
+def compute_expected_fitness(mu: jax.Array, cov_matrix: jax.Array, f_max: float = 5.0) -> jax.Array:
     """
     Compute the expected fitness ⟨f⟩ of the fitness function f(x,y) = f_max - x²y²/2
     under a Gaussian distribution N(μ, Σ).
@@ -156,7 +156,7 @@ def compute_expected_fitness_jax(mu: jax.Array, cov_matrix: jax.Array, f_max: fl
 
 
 @jax.jit
-def compute_log_expected_fitness_gradient_jax(mu: jax.Array, cov_matrix: jax.Array, f_max: float = 5.0) -> jax.Array:
+def compute_log_expected_fitness_gradient(mu: jax.Array, cov_matrix: jax.Array, f_max: float = 5.0) -> jax.Array:
     """
     Compute the gradient of log-expected fitness: ∇ ln ⟨F⟩ = ∇⟨F⟩ / ⟨F⟩
     
@@ -171,15 +171,15 @@ def compute_log_expected_fitness_gradient_jax(mu: jax.Array, cov_matrix: jax.Arr
     Returns:
         2D gradient vector of log-expected fitness
     """
-    expected_F = compute_expected_fitness_jax(mu, cov_matrix, f_max)
-    grad_F = compute_expected_gradient_jax(mu, cov_matrix)
+    expected_F = compute_expected_fitness(mu, cov_matrix, f_max)
+    grad_F = compute_expected_gradient(mu, cov_matrix)
     # Avoid division by zero
     safe_expected_F = jnp.maximum(expected_F, 1e-10)
     return grad_F / safe_expected_F
 
 
 @jax.jit
-def compute_log_expected_fitness_hessian_jax(mu: jax.Array, cov_matrix: jax.Array, f_max: float = 5.0) -> jax.Array:
+def compute_log_expected_fitness_hessian(mu: jax.Array, cov_matrix: jax.Array, f_max: float = 5.0) -> jax.Array:
     """
     Compute the Hessian of log-expected fitness: ∇² ln ⟨F⟩ = ⟨H⟩/⟨F⟩ - (∇⟨F⟩)(∇⟨F⟩)ᵀ / ⟨F⟩²
     
@@ -194,9 +194,9 @@ def compute_log_expected_fitness_hessian_jax(mu: jax.Array, cov_matrix: jax.Arra
     Returns:
         2x2 Hessian matrix of log-expected fitness
     """
-    expected_F = compute_expected_fitness_jax(mu, cov_matrix, f_max)
-    grad_F = compute_expected_gradient_jax(mu, cov_matrix)
-    hess_F = compute_expected_hessian_jax(mu, cov_matrix)
+    expected_F = compute_expected_fitness(mu, cov_matrix, f_max)
+    grad_F = compute_expected_gradient(mu, cov_matrix)
+    hess_F = compute_expected_hessian(mu, cov_matrix)
     
     # Avoid division by zero
     safe_expected_F = jnp.maximum(expected_F, 1e-10)
@@ -239,7 +239,7 @@ def _hessian_fitness_fn_2d(x: jax.Array) -> jax.Array:
 
 
 @partial(jax.jit, static_argnames=['n_samples'])
-def compute_free_energy_all_jax(
+def compute_free_energy(
     mu: jax.Array, 
     cov_matrix: jax.Array, 
     temperature: float,

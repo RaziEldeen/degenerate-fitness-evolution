@@ -6,7 +6,7 @@ All functions are JAX-compatible and many are JIT-compiled for performance.
 
 Main algorithms:
 - Evolutionary Dynamics (ED): `run_evolution`, `run_evolution_with_snapshots`
-- Gradient Descent: `run_gradient_descent_jax`, `run_gradient_descent_population`
+- Gradient Descent: `run_gradient_descent`, `run_gradient_descent_population`
 - Theoretical dynamics: `run_manifold_dynamics_theoretical`
 - Full Natural Gradient ES: `run_full_natural_gradient_es`
 """
@@ -18,12 +18,12 @@ from typing import Tuple
 
 # Import expected gradient/hessian functions for Full NES
 from objective_function import (
-    compute_expected_gradient_jax,
-    compute_expected_hessian_jax,
-    compute_expected_fitness_jax,
-    compute_log_expected_fitness_gradient_jax,
-    compute_log_expected_fitness_hessian_jax,
-    compute_free_energy_all_jax
+    compute_expected_gradient,
+    compute_expected_hessian,
+    compute_expected_fitness,
+    compute_log_expected_fitness_gradient,
+    compute_log_expected_fitness_hessian,
+    compute_free_energy
 )
 
 
@@ -538,7 +538,7 @@ def run_evolution_with_snapshots(
 # GRADIENT DESCENT
 # =============================================================================
 
-def run_gradient_descent_jax(
+def run_gradient_descent(
     key: jax.Array,
     initial_position: jax.Array,
     num_iterations: int,
@@ -583,7 +583,7 @@ def run_gradient_descent_jax(
         Sigma_matrix = Sigma
     
     # Call the JIT-compiled internal function
-    return _run_gradient_descent_jax_jit(
+    return _run_gradient_descent_jit(
         key, initial_position, num_iterations, learning_rate, Sigma_matrix,
         fitness_function, grad_func, hessian_func, noise_type, M, average_gradients
     )
@@ -593,7 +593,7 @@ def run_gradient_descent_jax(
     'num_iterations', 'fitness_function', 'grad_func', 'hessian_func',
     'noise_type', 'M', 'average_gradients'
 ])
-def _run_gradient_descent_jax_jit(
+def _run_gradient_descent_jit(
     key: jax.Array,
     initial_position: jax.Array,
     num_iterations: int,
@@ -610,7 +610,7 @@ def _run_gradient_descent_jax_jit(
     
     if average_gradients or M == 1:
         # Use gradient averaging within a single trajectory
-        return _run_gradient_descent_jax_single(
+        return _run_gradient_descent_single(
             key, initial_position, num_iterations, learning_rate, Sigma,
             fitness_function, grad_func, hessian_func, noise_type, M
         )
@@ -620,7 +620,7 @@ def _run_gradient_descent_jax_jit(
         
         # Vmap the single run function over the keys (with M=1 for each)
         vmapped_run = jax.vmap(
-            lambda k: _run_gradient_descent_jax_single(
+            lambda k: _run_gradient_descent_single(
                 k, initial_position, num_iterations, learning_rate, Sigma,
                 fitness_function, grad_func, hessian_func, noise_type, 1
             )
@@ -650,7 +650,7 @@ def _run_gradient_descent_jax_jit(
         return avg_final_position, avg_statistics
 
 
-def _run_gradient_descent_jax_single(
+def _run_gradient_descent_single(
     key: jax.Array,
     initial_position: jax.Array,
     num_iterations: int,
@@ -987,16 +987,16 @@ def run_full_natural_gradient_es(
     Run Full Natural Gradient Evolution Strategy that optimizes BOTH mean and covariance.
     """
     def grad_fn(mu, cov):
-        return compute_expected_gradient_jax(mu, cov)
+        return compute_expected_gradient(mu, cov)
     
     def hess_fn(mu, cov):
-        return compute_expected_hessian_jax(mu, cov)
+        return compute_expected_hessian(mu, cov)
     
     def fitness_fn(mu, cov):
-        return compute_expected_fitness_jax(mu, cov, f_max)
+        return compute_expected_fitness(mu, cov, f_max)
     
     def trace_fn(mu, cov):
-        return jnp.trace(compute_expected_hessian_jax(mu, cov))
+        return jnp.trace(compute_expected_hessian(mu, cov))
     
     return _run_natural_gradient_es_core(
         initial_mean, initial_std, mutation_std, num_iterations,
@@ -1050,16 +1050,16 @@ def run_multiplicative_natural_gradient_es(
                           post_mutation_covariance_history, covariance_history)
     """
     def grad_fn(mu, cov):
-        return compute_log_expected_fitness_gradient_jax(mu, cov, f_max)
+        return compute_log_expected_fitness_gradient(mu, cov, f_max)
     
     def hess_fn(mu, cov):
-        return compute_log_expected_fitness_hessian_jax(mu, cov, f_max)
+        return compute_log_expected_fitness_hessian(mu, cov, f_max)
     
     def fitness_fn(mu, cov):
-        return compute_expected_fitness_jax(mu, cov, f_max)
+        return compute_expected_fitness(mu, cov, f_max)
     
     def trace_fn(mu, cov):
-        return jnp.trace(compute_log_expected_fitness_hessian_jax(mu, cov, f_max))
+        return jnp.trace(compute_log_expected_fitness_hessian(mu, cov, f_max))
     
     return _run_natural_gradient_es_core(
         initial_mean, initial_std, mutation_std, num_iterations,
@@ -1138,8 +1138,8 @@ def run_exponential_natural_gradient_es(
     mutation_cov = jnp.eye(dim) * mutation_std**2
     
     # Calculate initial statistics
-    initial_fitness = compute_expected_fitness_jax(mu, initial_cov, f_max)
-    _, _, initial_hess = compute_free_energy_all_jax(
+    initial_fitness = compute_expected_fitness(mu, initial_cov, f_max)
+    _, _, initial_hess = compute_free_energy(
         mu, initial_cov, temperature, f_max, key, n_samples
     )
     initial_hessian_trace = jnp.trace(initial_hess)
@@ -1148,7 +1148,7 @@ def run_exponential_natural_gradient_es(
         mu, cov = state
         
         # Compute Free Energy gradient and Hessian using Monte Carlo
-        _, grad, hess = compute_free_energy_all_jax(
+        _, grad, hess = compute_free_energy(
             mu, cov, temperature, f_max, iter_key, n_samples
         )
         
@@ -1163,7 +1163,7 @@ def run_exponential_natural_gradient_es(
         # Clip covariance for stability
         cov_new = jnp.clip(cov_new, min_variance, max_variance)
         
-        expected_fitness = compute_expected_fitness_jax(mu_new, cov_new, f_max)
+        expected_fitness = compute_expected_fitness(mu_new, cov_new, f_max)
         hessian_trace = jnp.trace(hess)
         post_mutation_cov = cov_new + mutation_cov
         
