@@ -1,20 +1,23 @@
 """
-Example scripts for reproducing figures from:
+Reproduce figures from:
 
     "Evolution on degenerate fitness landscapes is not neutral:
      curvature drives directional drift"
 
-This script demonstrates the main algorithms:
-1. Evolutionary Dynamics (ED)
-2. Gradient Langevin Dynamics (GLD) / Stochastic Gradient Descent (SGD)
-3. Natural Evolution Strategy (NES)
-4. Theoretical dynamics predictions
+This script reproduces figures from the paper using:
+- Evolutionary Dynamics (ED)
+- Gradient Langevin Dynamics (GLD) / Stochastic Gradient Descent (SGD)
+- Natural Evolution Strategy (NES)
+- Theoretical dynamics predictions
 
 Usage:
-    python run_examples.py --example 1      # Run specific example
-    python run_examples.py --all            # Run all examples
-    python run_examples.py --list           # List available examples
-    python run_examples.py                  # Interactive mode
+    python reproduce_figures.py --fig 2      # Reproduce Figure 2 (main text)
+    python reproduce_figures.py --fig S1     # Reproduce Supplementary Figure 1
+    python reproduce_figures.py --main       # All main text figures (2-4)
+    python reproduce_figures.py --supp       # All supplementary figures (S1-S6)
+    python reproduce_figures.py --all        # All figures
+    python reproduce_figures.py --list       # List available figures
+    python reproduce_figures.py              # Interactive mode
 """
 
 import argparse
@@ -28,7 +31,6 @@ import matplotlib.pyplot as plt
 from algorithms import (
     run_evolution,
     run_evolution_with_snapshots,
-    run_gradient_descent_jax,
     run_full_natural_gradient_es,
     run_multiplicative_natural_gradient_es,
     run_exponential_natural_gradient_es,
@@ -45,75 +47,30 @@ from analysis import (
 from plot_utils import (
     setup_style,
     save_figure,
-    plot_comparison,
     plot_ed_vs_full_nes_summary,
     plot_dynamics_theory_vs_empirical,
-    plot_theory_ellipses_on_landscape,
-    plot_mutation_std_comparison,
     plot_high_dim_sigma_comparison,
     plot_ed_gd_sgd_populations,
-    plot_ed_gd_sgd_trajectories,
-    plot_ed_gd_sgd_avg_dynamics_and_populations,
     plot_mu_theory_and_mutation_std,
     plot_curvature_and_fitness_histograms,
     get_colors_for_values,
     compute_covariance_hessian_alignment,
-    plot_covariance_alignment_over_time,
-    plot_projected_variance_by_eigenvector,
-    plot_variance_eigenvalue_anticorrelation,
     plot_alignment_and_anticorrelation_summary,
 )
 
 # Import objective functions
-from objective_function import create_jax_landscape_2d, create_landscape_jax
+from objective_function import create_landscape_2d, create_landscape
 
 
-def run_theory_ellipse_example():
+def run_ed_vs_full_nes():
     """
-    Example 1: Plot theoretical distribution ellipses on fitness landscape.
+    Figure S1 (Supplementary): ED vs Full Natural Gradient ES.
     
-    Demonstrates the theoretical dynamics on the degenerate optimal manifold (y=0).
-    """
-    print("\n" + "=" * 60)
-    print("Example 1: Theoretical Ellipses on Fitness Landscape")
-    print("=" * 60)
-    
-    # Create fitness function
-    F_MAX = 5.0
-    fitness_fn, hessian_fn, grad_fn = create_jax_landscape_2d(Fmax=F_MAX)
-    
-    # Run theoretical dynamics
-    theory_stats = run_manifold_dynamics_theoretical(
-        initial_mu=3.0,       # Initial x-position on y=0 manifold
-        initial_a=0.05,       # Initial σ_x²
-        initial_b=0.05,       # Initial σ_y²
-        num_iterations=100,
-        beta=1.0,
-        m_x=0.01,             # Mutation variance in x
-        m_y=0.01              # Mutation variance in y
-    )
-    
-    # Plot ellipses on landscape
-    fig, ax = plot_theory_ellipses_on_landscape(
-        theory_statistics=theory_stats,
-        fitness_function=fitness_fn,
-        snapshot_times=[0, 10, 50],
-        params={'beta': 0.1, 'mutation_std': 0.05, 'n_sigma': 2.0},
-        save_fig=True
-    )
-    
-    print("[Done] Theory ellipse plot generated!")
-    return theory_stats
-
-
-def run_ed_vs_full_nes_example():
-    """
-    Example 2: Compare ED with Full Natural Gradient ES.
-    
-    Runs both algorithms and generates a comprehensive comparison plot.
+    Compares Evolutionary Dynamics with Full NES and generates a comprehensive
+    comparison plot showing population snapshots and trajectory evolution.
     """
     print("\n" + "=" * 60)
-    print("Example 2: ED vs Full NES Comparison")
+    print("Figure S1: ED vs Full NES Comparison")
     print("=" * 60)
     
     # Parameters
@@ -126,7 +83,7 @@ def run_ed_vs_full_nes_example():
     
     # Setup
     key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
+    fitness_func, hessian_func, grad_func = create_landscape_2d(F_MAX)
     initial_mean = jnp.array([2.0, 1.0])
     
     SNAPSHOT_TIMES = [1, 100, NUM_ITERATIONS]
@@ -186,14 +143,15 @@ def run_ed_vs_full_nes_example():
     return ed_stats, full_nes_stats
 
 
-def run_theory_vs_empirical_example():
+def run_theory_vs_empirical():
     """
-    Example 3: Compare theoretical dynamics with empirical ED and Full NES.
+    Figure 3 (Main Text): Theoretical vs Empirical Dynamics.
     
-    Verifies that the theoretical update rules match empirical simulations.
+    Compares theoretical dynamics predictions with empirical ED simulations,
+    verifying that the theoretical update rules match empirical behavior.
     """
     print("\n" + "=" * 60)
-    print("Example 3: Theoretical vs Empirical Dynamics")
+    print("Figure 3: Theoretical vs Empirical Dynamics")
     print("=" * 60)
     
     # Parameters
@@ -206,7 +164,7 @@ def run_theory_vs_empirical_example():
     
     # Setup
     key = jax.random.PRNGKey(30)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
+    fitness_func, hessian_func, grad_func = create_landscape_2d(F_MAX)
     initial_mean = jnp.array([2.5, 0.0])
     
     # Run ED
@@ -295,66 +253,16 @@ def run_theory_vs_empirical_example():
     return ed_stats, theory_stats
 
 
-def run_mutation_std_example():
+def run_ed_gd_sgd():
     """
-    Example 4: Compare different mutation standard deviations.
+    Figure 4 (Main Text): ED vs GLD vs SGD Populations.
     
-    Shows how mutation rate affects population evolution.
-    """
-    print("\n" + "=" * 60)
-    print("Example 4: Mutation Standard Deviation Comparison")
-    print("=" * 60)
-    
-    # Parameters
-    POPULATION_SIZE = 10000
-    NUM_ITERATIONS = 400
-    BETA = 0.1
-    F_MAX = 5.0
-    
-    mutation_std_values = [0.01, 0.1, 0.5]
-    
-    # Setup
-    key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
-    initial_mean = jnp.array([2.0, 1.0])
-    
-    print(f"Running ED with mutation rates: {mutation_std_values}")
-    
-    # Run comparison
-    comparison_results = run_mutation_std_comparison(
-        key=key,
-        initial_mean=initial_mean,
-        num_iterations=NUM_ITERATIONS,
-        population_size=POPULATION_SIZE,
-        num_select=POPULATION_SIZE,
-        mutation_std_values=mutation_std_values,
-        fitness_function=fitness_func,
-        hessian_func=hessian_func,
-        selection_method='linear',
-        beta=BETA,
-        track_hessian=True,
-        M=1
-    )
-    
-    # Plot results
-    plot_mutation_std_comparison(
-        comparison_results=comparison_results,
-        fitness_function=fitness_func,
-        save_fig=True
-    )
-    
-    print("[Done] Mutation std comparison plot generated!")
-    return comparison_results
-
-
-def run_ed_gd_sgd_example():
-    """
-    Example 5: Compare ED, GLD, and SGD final populations.
-    
-    Shows how the three algorithms produce different steady-state distributions.
+    Compares final population distributions from Evolutionary Dynamics,
+    Gradient Langevin Dynamics, and Stochastic Gradient Descent, showing
+    how each algorithm produces different steady-state distributions.
     """
     print("\n" + "=" * 60)
-    print("Example 5: ED vs GLD vs SGD Population Comparison")
+    print("Figure 4: ED vs GLD vs SGD Population Comparison")
     print("=" * 60)
     
     # Parameters
@@ -367,7 +275,7 @@ def run_ed_gd_sgd_example():
     
     # Setup
     key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
+    fitness_func, hessian_func, grad_func = create_landscape_2d(F_MAX)
     initial_mean = jnp.array([2.0, 0.0])
     initial_population = jax.random.uniform(key, shape=(POPULATION_SIZE, 2), minval=-3.0, maxval=3.0)
     
@@ -398,14 +306,15 @@ def run_ed_gd_sgd_example():
     return comparison_results
 
 
-def run_steady_state_histogram_example():
+def run_steady_state_histogram():
     """
-    Example 13: Steady-state curvature + fitness histograms (large population).
+    Figure S4 (Supplementary): Steady-State Histograms.
     
-    Runs ED with a large population and plots steady-state distributions.
+    Runs ED with a large population and plots steady-state distributions
+    of curvature and fitness values.
     """
     print("\n" + "=" * 60)
-    print("Example 13: Steady-State Histograms (Large Population)")
+    print("Figure S4: Steady-State Histograms (Large Population)")
     print("=" * 60)
     
     # Parameters
@@ -418,7 +327,7 @@ def run_steady_state_histogram_example():
     
     # Setup
     key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, _ = create_jax_landscape_2d(F_MAX)
+    fitness_func, hessian_func, _ = create_landscape_2d(F_MAX)
     initial_mean = jnp.array([2.0, 0.0])
     
     # Run ED (JAX-based)
@@ -453,14 +362,15 @@ def run_steady_state_histogram_example():
     return ed_final_pop
 
 
-def run_high_dim_steady_state_histogram_example():
+def run_high_dim_steady_state_histogram():
     """
-    Example 14: High-D steady-state curvature + fitness histograms.
+    Figure S6 (Supplementary): High-D Steady-State Histograms.
     
-    Runs ED on a high-D landscape and plots steady-state distributions.
+    Runs ED on a high-dimensional landscape and plots steady-state
+    distributions of curvature and fitness values.
     """
     print("\n" + "=" * 60)
-    print("Example 14: High-D Steady-State Histograms")
+    print("Figure S6: High-D Steady-State Histograms")
     print("=" * 60)
     
     # High-D landscape parameters
@@ -478,7 +388,7 @@ def run_high_dim_steady_state_histogram_example():
     
     # Setup
     key = jax.random.PRNGKey(123)
-    fitness_func, hessian_func, _ = create_landscape_jax(Fmax=F_MAX, NS=NS, NF=NF, key=key)
+    fitness_func, hessian_func, _ = create_landscape(Fmax=F_MAX, NS=NS, NF=NF, key=key)
     initial_x = jnp.ones(NF) * 0.5
     initial_y = jnp.ones(NS) * 0.5
     initial_mean = jnp.concatenate([initial_x, initial_y])
@@ -531,138 +441,15 @@ def run_high_dim_steady_state_histogram_example():
     return ed_final_pop
 
 
-def run_ed_gd_sgd_trajectory_example():
+def run_high_dim_ed():
     """
-    Example 6: Compare ED, GLD, and SGD trajectories.
+    Figure S5 (Supplementary): High-D Evolutionary Dynamics.
     
-    Shows fitness, curvature, and trajectory for each algorithm.
-    Displays both a single example trajectory and the average trajectory.
-    """
-    print("\n" + "=" * 60)
-    print("Example 6: ED vs GLD vs SGD Trajectory Comparison")
-    print("=" * 60)
-    
-    # Parameters
-    POPULATION_SIZE = 1000
-    NUM_ITERATIONS = 300
-    MUTATION_STD = 0.5
-    BETA = 0.01
-    F_MAX = 5.0
-    
-    # Setup
-    key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
-    initial_mean = jnp.array([2.0, 1.0])
-    
-    # Run comparison
-    comparison_results = run_ed_gd_sgd_comparison(
-        key=key,
-        initial_mean=initial_mean,
-        num_iterations=NUM_ITERATIONS,
-        population_size=POPULATION_SIZE,
-        mutation_std=MUTATION_STD,
-        beta=BETA,
-        learning_rate=BETA/MUTATION_STD**2,
-        fitness_function=fitness_func,
-        grad_func=grad_func,
-        hessian_func=hessian_func,
-        M=POPULATION_SIZE
-    )
-    
-    # Plot trajectories (fitness, curvature, trajectory)
-    plot_ed_gd_sgd_trajectories(
-        comparison_results=comparison_results,
-        fitness_function=fitness_func,
-        F_MAX=F_MAX,
-        save_fig=True
-    )
-    
-    print("[Done] ED vs GLD vs SGD trajectory plot generated!")
-    return comparison_results
-
-
-def run_ed_gd_sgd_avg_dynamics_and_populations_example():
-    """
-    Example 8: Average dynamics (from example 6) + final populations (example 5).
-    
-    Top row: average trajectory/curvature/fitness. Bottom row: final populations.
+    Runs ED on a high-dimensional landscape with NF flat directions and
+    NS sharp directions, plotting fitness, curvature, and covariance alignment.
     """
     print("\n" + "=" * 60)
-    print("Example 8: ED vs GLD vs SGD Avg Dynamics + Populations")
-    print("=" * 60)
-    
-    # Parameters for average dynamics (aligned with example 6 for runtime)
-    POP_SIZE_AVG = 1000
-    NUM_ITER_AVG = 300
-    MUT_STD_AVG = 0.05
-    BETA_AVG = 0.01
-    F_MAX = 5.0
-    
-    # Setup
-    key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
-    initial_mean = jnp.array([2.0, 1.0])
-    
-    # Run comparison for average dynamics (top row)
-    avg_results = run_ed_gd_sgd_comparison(
-        key=key,
-        initial_mean=initial_mean,
-        num_iterations=NUM_ITER_AVG,
-        population_size=POP_SIZE_AVG,
-        mutation_std=MUT_STD_AVG,
-        beta=BETA_AVG,
-        learning_rate=BETA_AVG,
-        fitness_function=fitness_func,
-        grad_func=grad_func,
-        hessian_func=hessian_func,
-        M=POP_SIZE_AVG
-    )
-    
-    # Parameters for final populations (aligned with example 5)
-    POP_SIZE_POP = 1000
-    NUM_ITER_POP = 10000
-    MUT_STD_POP = 0.05
-    BETA_POP = 0.1
-    
-    # Run comparison for final populations (bottom row)
-    key, pop_key = jax.random.split(key)
-    pop_results = run_ed_gd_sgd_comparison(
-        key=pop_key,
-        initial_mean=initial_mean,
-        num_iterations=NUM_ITER_POP,
-        population_size=POP_SIZE_POP,
-        mutation_std=MUT_STD_POP,
-        beta=BETA_POP,
-        learning_rate=BETA_POP,
-        fitness_function=fitness_func,
-        grad_func=grad_func,
-        hessian_func=hessian_func,
-        initial_population=jax.random.uniform(
-            pop_key, shape=(POP_SIZE_POP, 2), minval=-3.0, maxval=3.0
-        )
-    )
-    
-    # Plot combined figure
-    plot_ed_gd_sgd_avg_dynamics_and_populations(
-        avg_dynamics_results=avg_results,
-        population_results=pop_results,
-        fitness_function=fitness_func,
-        F_MAX=F_MAX,
-        save_fig=True
-    )
-    
-    print("[Done] Avg dynamics + population plot generated!")
-    return avg_results, pop_results
-
-
-def run_high_dim_ed_example():
-    """
-    Example 9: High-dimensional ED with NF flat directions and NS sharp ones.
-    
-    Runs ED on a high-D landscape and plots fitness and curvature vs time.
-    """
-    print("\n" + "=" * 60)
-    print("Example 9: High-D ED (NF flat, NS sharp)")
+    print("Figure S5: High-D ED (NF flat, NS sharp)")
     print("=" * 60)
     
     # High-D landscape parameters
@@ -679,7 +466,7 @@ def run_high_dim_ed_example():
     
     # Setup
     key = jax.random.PRNGKey(123)
-    fitness_func, hessian_func, _ = create_landscape_jax(Fmax=F_MAX, NS=NS, NF=NF, key=key)
+    fitness_func, hessian_func, _ = create_landscape(Fmax=F_MAX, NS=NS, NF=NF, key=key)
     initial_x = jnp.ones(NF) * 0.5
     initial_y = jnp.ones(NS) * 0.5
     initial_mean = jnp.concatenate([initial_x, initial_y])
@@ -753,128 +540,25 @@ def run_high_dim_ed_example():
         save_fig=True,
         filename_prefix=f"alignment_anticorrelation_NF{NF}_NS{NS}_iter{NUM_ITERATIONS}"
     )
-
-    
-    # plot_projected_variance_by_eigenvector(
-    #     alignment_data=alignment_data,
-    #     snapshot_times=[0, NUM_ITERATIONS // 2, NUM_ITERATIONS],
-    #     save_fig=True,
-    #     filename_prefix=f"projected_variance_NF{NF}_NS{NS}_iter{NUM_ITERATIONS}"
-    # )
-    
-    # plot_variance_eigenvalue_anticorrelation(
-    #     alignment_data=alignment_data,
-    #     snapshot_times=[0, 5, 10],
-    #     save_fig=True,
-    #     filename_prefix=f"variance_eigenvalue_anticorrelation_NF{NF}_NS{NS}_iter{NUM_ITERATIONS}"
-    # )
     
     print("[Done] High-D ED fitness, curvature, and covariance alignment plots generated!")
     return ed_stats, alignment_data
 
 
-def run_ed_proportional_selection_example():
+def run_combined_mu_mutation():
     """
-    Example 10: ED with proportional selection.
+    Figure 2 (Main Text): Mean Dynamics and Mutation Effects.
     
-    Demonstrates evolutionary dynamics using proportional (fitness-weighted) selection
-    instead of linear selection. Compares proportional vs linear selection dynamics.
-    """
-    print("\n" + "=" * 60)
-    print("Example 10: ED with Proportional Selection")
-    print("=" * 60)
-    
-    # Parameters
-    POPULATION_SIZE = 10000
-    NUM_ITERATIONS = 200
-    MUTATION_STD = 0.05
-    BETA = 0.1
-    F_MAX = 5.0
-    SIGMA = MUTATION_STD**2
-    
-    # Setup
-    key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
-    initial_mean = jnp.array([2.0, 0.0])
-    
-    SNAPSHOT_TIMES = [1, 50, 100, NUM_ITERATIONS]
-    
-    # Run ED with proportional selection
-    key, prop_key = jax.random.split(key)
-    print("Running ED with proportional selection...")
-    prop_stats, prop_final_pop, prop_snapshots = run_evolution_with_snapshots(
-        key=prop_key,
-        initial_mean=initial_mean,
-        num_iterations=max(SNAPSHOT_TIMES),
-        population_size=POPULATION_SIZE,
-        sigma=SIGMA,
-        num_select=POPULATION_SIZE,
-        fitness_function=fitness_func,
-        hessian_func=hessian_func,
-        snapshot_times=SNAPSHOT_TIMES,
-        selection_method='proportional',
-        beta=BETA,
-        track_hessian=True
-    )
-    
-    # Run ED with linear selection for comparison
-    key, lin_key = jax.random.split(key)
-    print("Running ED with linear selection for comparison...")
-    lin_stats, lin_final_pop, lin_snapshots = run_evolution_with_snapshots(
-        key=lin_key,
-        initial_mean=initial_mean,
-        num_iterations=max(SNAPSHOT_TIMES),
-        population_size=POPULATION_SIZE,
-        sigma=SIGMA,
-        num_select=POPULATION_SIZE,
-        fitness_function=fitness_func,
-        hessian_func=hessian_func,
-        snapshot_times=SNAPSHOT_TIMES,
-        selection_method='linear',
-        beta=BETA,
-        track_hessian=True
-    )
-    
-    # Extract statistics
-    prop_time, prop_pos, prop_fitness, prop_hessian, prop_cov = prop_stats
-    lin_time, lin_pos, lin_fitness, lin_hessian, lin_cov = lin_stats
-    
-    # Print comparison
-    print(f"\nFinal values at t={NUM_ITERATIONS}:")
-    print(f"  Proportional: μ=({prop_pos[-1, 0]:.4f}, {prop_pos[-1, 1]:.4f}), fitness={prop_fitness[-1]:.4f}")
-    print(f"  Linear:       μ=({lin_pos[-1, 0]:.4f}, {lin_pos[-1, 1]:.4f}), fitness={lin_fitness[-1]:.4f}")
-    
-    # Plot comparison
-    plot_comparison(
-        results={
-            "ED (Proportional)": prop_stats,
-            "ED (Linear)": lin_stats
-        },
-        title="Proportional vs Linear Selection",
-        plot_fitness=True,
-        plot_contours=True,
-        plot_curvature=True,
-        fitness_function=fitness_func
-    )
-    
-    print("[Done] Proportional selection comparison plot generated!")
-    return prop_stats, lin_stats
-
-
-def run_combined_mu_mutation_example():
-    """
-    Example 7: Combine μ_t vs time with mutation std trajectory and curvature.
-    
-    Uses μ_t from theory vs empirical dynamics (start at (2,0)) and
-    trajectory/curvature from mutation std comparison (start at (2,1)).
+    Combines mean position dynamics (μ_t vs time) with trajectory and
+    curvature evolution for different mutation standard deviations.
     """
     print("\n" + "=" * 60)
-    print("Example 7: Combined μ_t + Mutation Std Trajectory/Curvature")
+    print("Figure 2: Mean Dynamics and Mutation Effects")
     print("=" * 60)
     
     # Shared setup
     F_MAX = 5.0
-    fitness_func, hessian_func, _ = create_jax_landscape_2d(F_MAX)
+    fitness_func, hessian_func, _ = create_landscape_2d(F_MAX)
     key = jax.random.PRNGKey(30)
     
     # --- μ_t vs time (theory vs empirical) ---
@@ -967,15 +651,16 @@ def run_combined_mu_mutation_example():
     return ed_stats, theory_stats, mutation_results
 
 
-def run_ed_vs_multiplicative_nes_example():
+def run_ed_vs_multiplicative_nes():
     """
-    Example 11: Compare ED (proportional selection) with Multiplicative NES on log-fitness.
+    Figure S2 (Supplementary): ED (Multiplicative) vs NES on Log-Fitness.
     
-    Demonstrates that ED with multiplicative/proportional selection performs 
-    natural gradient ascent on log-expected fitness, not regular fitness.
+    Compares ED with multiplicative selection to NES, demonstrating that
+    multiplicative selection performs natural gradient ascent on log-expected
+    fitness rather than regular fitness.
     """
     print("\n" + "=" * 60)
-    print("Example 11: ED (Multiplicative) vs NES on Log-Fitness")
+    print("Figure S2: ED (Multiplicative) vs NES on Log-Fitness")
     print("=" * 60)
     
     # Parameters
@@ -987,7 +672,7 @@ def run_ed_vs_multiplicative_nes_example():
     
     # Setup
     key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
+    fitness_func, hessian_func, grad_func = create_landscape_2d(F_MAX)
     initial_mean = jnp.array([2.0, 1.0])
     
     SNAPSHOT_TIMES = [1, 100, NUM_ITERATIONS]
@@ -1055,19 +740,16 @@ def run_ed_vs_multiplicative_nes_example():
     return ed_stats, mult_nes_stats
 
 
-def run_ed_vs_exponential_nes_example():
+def run_ed_vs_exponential_nes():
     """
-    Example 12: Compare ED (Boltzmann/exponential selection) with Exponential NES on Free Energy.
+    Figure S3 (Supplementary): ED (Boltzmann) vs NES on Free Energy.
     
-    Demonstrates that ED with exponential/Boltzmann selection W(x) = exp(F(x)/T)
-    performs natural gradient ascent on the Free Energy E = ln ⟨exp(F/T)⟩.
-    
-    The temperature parameter T controls selection pressure:
-    - T → ∞: Uniform selection (exploration)
-    - T → 0: Greedy selection (exploitation)
+    Compares ED with Boltzmann/exponential selection W(x) = exp(F(x)/T) to NES,
+    demonstrating natural gradient ascent on the Free Energy E = ln ⟨exp(F/T)⟩.
+    The temperature parameter T controls selection pressure.
     """
     print("\n" + "=" * 60)
-    print("Example 12: ED (Boltzmann) vs NES on Free Energy")
+    print("Figure S3: ED (Boltzmann) vs NES on Free Energy")
     print("=" * 60)
     
     # Parameters
@@ -1080,7 +762,7 @@ def run_ed_vs_exponential_nes_example():
     
     # Setup
     key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
+    fitness_func, hessian_func, grad_func = create_landscape_2d(F_MAX)
     initial_mean = jnp.array([2.0, 1.0])
     
     SNAPSHOT_TIMES = [1, 100, NUM_ITERATIONS]
@@ -1154,243 +836,140 @@ def run_ed_vs_exponential_nes_example():
     return ed_stats, exp_nes_stats
 
 
-def run_ed_vs_exponential_nes_temperature_sweep():
-    """
-    Example 12b: Compare ED (Boltzmann) vs Exponential NES across different temperatures.
-    
-    Shows how temperature affects the selection pressure and convergence.
-    """
-    print("\n" + "=" * 60)
-    print("Example 12b: Temperature Sweep for Boltzmann Selection")
-    print("=" * 60)
-    
-    # Parameters
-    POPULATION_SIZE = 10000
-    NUM_ITERATIONS = 150
-    MUTATION_STD = 0.05
-    F_MAX = 5.0
-    SIGMA = MUTATION_STD**2
-    
-    # Temperature values to compare
-    TEMPERATURES = [0.5, 1.0, 2.0, 5.0]
-    
-    # Setup
-    key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, grad_func = create_jax_landscape_2d(F_MAX)
-    initial_mean = jnp.array([2.0, 1.0])
-    
-    results = []
-    
-    for temp in TEMPERATURES:
-        print(f"\nRunning with Temperature T={temp}...")
-        
-        key, ed_key, nes_key = jax.random.split(key, 3)
-        
-        # Run ED with Boltzmann selection
-        ed_avg_stats, ed_ex_stats, ed_final_pop = run_evolution(
-            key=ed_key,
-            initial_mean=initial_mean,
-            num_iterations=NUM_ITERATIONS,
-            population_size=POPULATION_SIZE,
-            sigma=SIGMA,
-            num_select=POPULATION_SIZE,
-            fitness_function=fitness_func,
-            hessian_func=hessian_func,
-            selection_method='boltzmann',
-            softmax_temperature=temp,
-            track_hessian=True,
-            M=1
-        )
-        
-        # Run Exponential NES
-        exp_nes_stats = run_exponential_natural_gradient_es(
-            initial_mean=initial_mean,
-            initial_std=MUTATION_STD,
-            mutation_std=MUTATION_STD,
-            num_iterations=NUM_ITERATIONS,
-            temperature=temp,
-            eta_mu=1.0,
-            eta_sigma=1.0,
-            f_max=F_MAX,
-            n_samples=10000,
-            key=nes_key
-        )
-        
-        ed_time, ed_pos, ed_fitness, ed_hessian, ed_cov = ed_avg_stats
-        nes_time, nes_pos, nes_fitness, nes_hessian, nes_post_cov, nes_cov = exp_nes_stats
-        
-        print(f"  ED final:  μ=({ed_pos[-1, 0]:.4f}, {ed_pos[-1, 1]:.4f}), fitness={ed_fitness[-1]:.4f}")
-        print(f"  NES final: μ=({nes_pos[-1, 0]:.4f}, {nes_pos[-1, 1]:.4f}), fitness={nes_fitness[-1]:.4f}")
-        
-        results.append({
-            'temperature': temp,
-            'ed_stats': ed_avg_stats,
-            'nes_stats': exp_nes_stats
-        })
-    
-    # Create comparison figure
-    print("\nGenerating temperature comparison plot...")
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    
-    colors = plt.cm.viridis(np.linspace(0, 0.8, len(TEMPERATURES)))
-    
-    for idx, (result, color) in enumerate(zip(results, colors)):
-        temp = result['temperature']
-        ed_time, ed_pos, ed_fitness, _, _ = result['ed_stats']
-        nes_time, nes_pos, nes_fitness, _, _, _ = result['nes_stats']
-        
-        # Plot x trajectory
-        axes[0, 0].plot(ed_time, ed_pos[:, 0], '-', color=color, alpha=0.8, 
-                       label=f'ED T={temp}')
-        axes[0, 0].plot(nes_time, nes_pos[:, 0], '--', color=color, alpha=0.8,
-                       label=f'NES T={temp}')
-    
-        # Plot y trajectory
-        axes[0, 1].plot(ed_time, ed_pos[:, 1], '-', color=color, alpha=0.8)
-        axes[0, 1].plot(nes_time, nes_pos[:, 1], '--', color=color, alpha=0.8)
-        
-        # Plot fitness
-        axes[1, 0].plot(ed_time, ed_fitness, '-', color=color, alpha=0.8)
-        axes[1, 0].plot(nes_time, nes_fitness, '--', color=color, alpha=0.8)
-        
-        # Plot 2D trajectory
-        axes[1, 1].plot(ed_pos[:, 0], ed_pos[:, 1], '-', color=color, alpha=0.8,
-                       label=f'T={temp}')
-        axes[1, 1].plot(nes_pos[:, 0], nes_pos[:, 1], '--', color=color, alpha=0.8)
-    
-    axes[0, 0].set_xlabel('Iteration')
-    axes[0, 0].set_ylabel('x position')
-    axes[0, 0].set_title('X Trajectory (solid=ED, dashed=NES)')
-    axes[0, 0].legend(fontsize=8, ncol=2)
-    axes[0, 0].grid(True, alpha=0.3)
-    
-    axes[0, 1].set_xlabel('Iteration')
-    axes[0, 1].set_ylabel('y position')
-    axes[0, 1].set_title('Y Trajectory')
-    axes[0, 1].grid(True, alpha=0.3)
-    
-    axes[1, 0].set_xlabel('Iteration')
-    axes[1, 0].set_ylabel('Fitness')
-    axes[1, 0].set_title('Fitness Evolution')
-    axes[1, 0].grid(True, alpha=0.3)
-    
-    axes[1, 1].set_xlabel('x')
-    axes[1, 1].set_ylabel('y')
-    axes[1, 1].set_title('2D Trajectories')
-    axes[1, 1].legend(fontsize=8)
-    axes[1, 1].grid(True, alpha=0.3)
-    axes[1, 1].set_aspect('equal')
-    
-    plt.suptitle(f'Boltzmann Selection: Temperature Comparison\n'
-                f'Pop={POPULATION_SIZE}, Iterations={NUM_ITERATIONS}, σ_mut={MUTATION_STD}',
-                fontsize=12)
-    plt.tight_layout()
-    
-    filename = f'boltzmann_temperature_sweep_iter{NUM_ITERATIONS}_pop{POPULATION_SIZE}'
-    save_figure(fig, filename, format='jpeg')
-    plt.close()
-    
-    print("[Done] Temperature sweep comparison complete!")
-    return results
-
-
-# Map example numbers to their functions and descriptions
-EXAMPLES = {
-    '1': ('Theory ellipses on landscape', run_theory_ellipse_example),
-    '2': ('ED vs Full NES comparison', run_ed_vs_full_nes_example),
-    '3': ('Theory vs empirical dynamics', run_theory_vs_empirical_example),
-    '4': ('Mutation std comparison', run_mutation_std_example),
-    '5': ('ED vs GLD vs SGD populations', run_ed_gd_sgd_example),
-    '6': ('ED vs GLD vs SGD trajectories', run_ed_gd_sgd_trajectory_example),
-    '7': ('Combined mu_t + mutation std', run_combined_mu_mutation_example),
-    '8': ('Avg dynamics + populations', run_ed_gd_sgd_avg_dynamics_and_populations_example),
-    '9': ('High-D ED fitness/curvature', run_high_dim_ed_example),
-    '10': ('ED with proportional selection', run_ed_proportional_selection_example),
-    '11': ('ED (Multiplicative) vs NES', run_ed_vs_multiplicative_nes_example),
-    '12': ('ED (Boltzmann) vs NES', run_ed_vs_exponential_nes_example),
-    '12b': ('Boltzmann temperature sweep', run_ed_vs_exponential_nes_temperature_sweep),
-    '13': ('Steady-state histograms', run_steady_state_histogram_example),
-    '14': ('High-D steady-state histograms', run_high_dim_steady_state_histogram_example),
+# Map figure numbers to their functions and descriptions
+FIGURES = {
+    # Main text figures
+    '2': ('Fig 2: Mean dynamics and mutation effects', run_combined_mu_mutation),
+    '3': ('Fig 3: Theory vs empirical dynamics', run_theory_vs_empirical),
+    '4': ('Fig 4: ED vs GLD vs SGD populations', run_ed_gd_sgd),
+    # Supplementary figures
+    'S1': ('Fig S1: ED vs Full NES', run_ed_vs_full_nes),
+    'S2': ('Fig S2: ED (Multiplicative) vs NES', run_ed_vs_multiplicative_nes),
+    'S3': ('Fig S3: ED (Boltzmann) vs NES', run_ed_vs_exponential_nes),
+    'S4': ('Fig S4: Steady-state histograms', run_steady_state_histogram),
+    'S5': ('Fig S5: High-D ED dynamics', run_high_dim_ed),
+    'S6': ('Fig S6: High-D steady-state histograms', run_high_dim_steady_state_histogram),
 }
 
+# Keys for different figure groups
+MAIN_FIGURES = ['2', '3', '4']
+SUPP_FIGURES = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']
+ALL_FIGURES = MAIN_FIGURES + SUPP_FIGURES
 
-def list_examples():
-    """Print available examples."""
-    print("\nAvailable examples:")
-    print("-" * 50)
-    for key, (desc, _) in EXAMPLES.items():
+
+def list_figures():
+    """Print available figures."""
+    print("\nAvailable figures:")
+    print("-" * 60)
+    print("Main Text:")
+    for key in MAIN_FIGURES:
+        desc, _ = FIGURES[key]
         print(f"  {key:4s}  {desc}")
-    print("-" * 50)
+    print("\nSupplementary:")
+    for key in SUPP_FIGURES:
+        desc, _ = FIGURES[key]
+        print(f"  {key:4s}  {desc}")
+    print("-" * 60)
 
 
-def run_example(choice):
-    """Run a single example by its key."""
-    if choice not in EXAMPLES:
-        print(f"Invalid example: {choice}")
-        list_examples()
+def run_figure(choice):
+    """Run a single figure by its key."""
+    if choice not in FIGURES:
+        print(f"Invalid figure: {choice}")
+        list_figures()
         return False
     
-    desc, func = EXAMPLES[choice]
-    print(f"\nRunning Example {choice}: {desc}")
+    desc, func = FIGURES[choice]
+    print(f"\nReproducing {desc}")
     func()
     return True
 
 
-def run_all_examples():
-    """Run all examples sequentially."""
-    for key in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14']:
-        run_example(key)
+def run_main_figures():
+    """Reproduce all main text figures (2-4)."""
+    for key in MAIN_FIGURES:
+        run_figure(key)
+
+
+def run_supp_figures():
+    """Reproduce all supplementary figures (S1-S6)."""
+    for key in SUPP_FIGURES:
+        run_figure(key)
+
+
+def run_all_figures():
+    """Reproduce all figures sequentially."""
+    for key in ALL_FIGURES:
+        run_figure(key)
 
 
 def interactive_mode():
     """Run in interactive mode with menu."""
-    list_examples()
-    print("  a     Run all examples")
+    list_figures()
+    print("\n  main  Reproduce all main text figures")
+    print("  supp  Reproduce all supplementary figures")
+    print("  all   Reproduce all figures")
     
     choice = input("\nEnter choice: ").strip().lower()
     
-    if choice == 'a':
-        run_all_examples()
+    if choice == 'all':
+        run_all_figures()
+    elif choice == 'main':
+        run_main_figures()
+    elif choice == 'supp':
+        run_supp_figures()
     else:
-        run_example(choice)
+        run_figure(choice.upper() if choice.startswith('s') else choice)
 
 
 def main():
     """Main entry point with CLI support."""
     parser = argparse.ArgumentParser(
-        description='Evolutionary Dynamics Examples',
+        description='Reproduce figures from the paper',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run_examples.py --example 1     Run example 1
-  python run_examples.py --example 3     Run example 3
-  python run_examples.py --all           Run all examples
-  python run_examples.py --list          List available examples
-  python run_examples.py                 Interactive mode
+  python reproduce_figures.py --fig 2      Reproduce Figure 2 (main text)
+  python reproduce_figures.py --fig S1     Reproduce Supplementary Figure 1
+  python reproduce_figures.py --main       Reproduce all main text figures (2-4)
+  python reproduce_figures.py --supp       Reproduce all supplementary figures (S1-S6)
+  python reproduce_figures.py --all        Reproduce all figures
+  python reproduce_figures.py --list       List available figures
+  python reproduce_figures.py              Interactive mode
         """
     )
-    parser.add_argument('--example', '-e', type=str, 
-                        help='Example number to run (1-14, or 12b)')
+    parser.add_argument('--fig', '-f', type=str, 
+                        help='Figure to reproduce (2, 3, 4, S1-S6)')
+    parser.add_argument('--main', action='store_true',
+                        help='Reproduce all main text figures (2-4)')
+    parser.add_argument('--supp', action='store_true',
+                        help='Reproduce all supplementary figures (S1-S6)')
     parser.add_argument('--all', '-a', action='store_true',
-                        help='Run all examples')
+                        help='Reproduce all figures')
     parser.add_argument('--list', '-l', action='store_true',
-                        help='List available examples')
+                        help='List available figures')
     
     args = parser.parse_args()
     
     print("=" * 60)
-    print("Evolutionary Dynamics - Example Scripts")
+    print("Reproduce Paper Figures")
     print("=" * 60)
     
     # Setup style
     setup_style()
     
     if args.list:
-        list_examples()
+        list_figures()
     elif args.all:
-        run_all_examples()
-    elif args.example:
-        run_example(args.example)
+        run_all_figures()
+    elif args.main:
+        run_main_figures()
+    elif args.supp:
+        run_supp_figures()
+    elif args.fig:
+        # Normalize figure key (e.g., 's1' -> 'S1')
+        fig_key = args.fig.upper() if args.fig.lower().startswith('s') else args.fig
+        run_figure(fig_key)
     else:
         # Interactive mode
         interactive_mode()

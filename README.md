@@ -28,39 +28,51 @@ pip install -r requirements.txt
 - Matplotlib
 - Seaborn
 
-## Usage
+## Reproducing Paper Figures
 
-### Run Specific Examples
+### Reproduce Specific Figures
 
 ```bash
-python run_examples.py --example 1    # Theory ellipses on landscape
-python run_examples.py --example 3    # Theory vs empirical dynamics
-python run_examples.py --example 9    # High-dimensional ED
+python reproduce_figures.py --fig 2      # Figure 2 (main text)
+python reproduce_figures.py --fig 3      # Figure 3 (main text)
+python reproduce_figures.py --fig S1     # Supplementary Figure 1
 ```
 
-### Run All Examples
+### Reproduce All Main Text Figures
 
 ```bash
-python run_examples.py --all
+python reproduce_figures.py --main
 ```
 
-### List Available Examples
+### Reproduce All Supplementary Figures
 
 ```bash
-python run_examples.py --list
+python reproduce_figures.py --supp
+```
+
+### Reproduce All Figures
+
+```bash
+python reproduce_figures.py --all
+```
+
+### List Available Figures
+
+```bash
+python reproduce_figures.py --list
 ```
 
 ### Interactive Mode
 
 ```bash
-python run_examples.py
+python reproduce_figures.py
 ```
 
 ## Module Structure
 
 | File | Description |
 |------|-------------|
-| `run_examples.py` | Main script with example experiments |
+| `reproduce_figures.py` | Main script to reproduce paper figures |
 | `algorithms.py` | Core algorithm implementations (ED, GLD, SGD, NES) |
 | `objective_function.py` | Fitness landscape definitions |
 | `analysis.py` | Comparison and analysis wrappers |
@@ -68,23 +80,25 @@ python run_examples.py
 
 ## Output
 
-Generated figures are saved to the `figures/` directory in JPEG format.
+Generated figures are saved to the `figures/` directory.
 
-## Examples
+## Figure Reference
 
-| # | Description |
-|---|-------------|
-| 1 | Theory ellipses on fitness landscape |
-| 2 | ED vs Full NES comparison |
+### Main Text
+
+| Figure | Description |
+|--------|-------------|
+| 2 | Mean dynamics and mutation effects |
 | 3 | Theory vs empirical dynamics |
-| 4 | Mutation rate comparison |
-| 5 | ED vs GLD vs SGD final populations |
-| 6 | ED vs GLD vs SGD trajectories |
-| 7 | Combined mean dynamics and mutation effects |
-| 8 | Average dynamics and population distributions |
-| 9 | High-dimensional ED with flat/sharp directions |
-| 10 | ED with proportional selection |
-| 11 | ED (Multiplicative) vs NES on log-fitness |
-| 12 | ED (Boltzmann) vs NES on free energy |
-| 13 | Steady-state curvature and fitness histograms |
-| 14 | High-dimensional steady-state histograms |
+| 4 | ED vs GLD vs SGD populations |
+
+### Supplementary
+
+| Figure | Description |
+|--------|-------------|
+| S1 | ED vs Full NES comparison |
+| S2 | ED (Multiplicative) vs NES on log-fitness |
+| S3 | ED (Boltzmann) vs NES on free energy |
+| S4 | Steady-state curvature and fitness histograms |
+| S5 | High-dimensional ED with flat/sharp directions |
+| S6 | High-dimensional steady-state histograms |
