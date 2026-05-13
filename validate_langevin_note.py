@@ -418,59 +418,70 @@ def figure_2_singular_landscape():
     F_MAX = 10.0
     _, _, grad_func = create_landscape_2d(F_MAX)
 
-    SIGMA_L = 0.05
     INIT_BOUND = 3.0
     POP = 1000
-    T_CONTINUOUS = 1000.0
-    eta_values = (0.01, 0.05, 0.10)
 
-    print(f"  σ = {SIGMA_L}, init_bound = {INIT_BOUND}, pop = {POP}")
-    print(f"  Common horizon: τ_end = {T_CONTINUOUS}")
-    print(f"  η values = {eta_values}  →  num_iterations = τ_end/η each")
+    # ---- Panel (b): vary σ at fixed η = 0.10 (the archive's params) ----
+    ETA_B = 0.10
+    N_ITER_B = 10_000  # matches the archived langevin_tss_validity_*.jpeg
+    sigma_values = (0.02, 0.05, 0.10)
 
-    results = {}
-    for i, eta in enumerate(eta_values):
-        n_iter = int(round(T_CONTINUOUS / eta))
+    print(f"  Panel (b): η = {ETA_B}, n_iter = {N_ITER_B}, init_bound = {INIT_BOUND}, "
+          f"pop = {POP}, τ_end = {ETA_B * N_ITER_B}")
+    print(f"  σ values = {sigma_values}")
+
+    results_b = {}
+    for i, sigma_b in enumerate(sigma_values):
         key = jax.random.PRNGKey(100 + i)
-        # 101 evenly-spaced snapshots → indices [0, n_iter/100, 2·n_iter/100, …,
-        # n_iter]. Covers τ=10, 100, 1000 exactly when n_iter is a multiple of
-        # 100, which is true for all our η values.
         out = diagnose_langevin_tss_validity(
             key=key,
-            num_iterations=n_iter,
+            num_iterations=N_ITER_B,
             population_size=POP,
-            mutation_std=SIGMA_L,
-            learning_rate=eta,
+            mutation_std=sigma_b,
+            learning_rate=ETA_B,
             grad_func=grad_func,
             init_bound=INIT_BOUND,
             num_snapshots=101,
         )
-        burn = n_iter // 2
+        burn = N_ITER_B // 2
         plateau_emp = float(np.mean(out['stats']['mean_x_sq'][burn:]))
         plateau_std = float(np.std(out['stats']['mean_x_sq'][burn:]))
-        results[eta] = {'out': out, 'plateau': plateau_emp, 'plateau_std': plateau_std,
-                        'n_iter': n_iter}
-        print(f"\n  [η={eta}, n_iter={n_iter}]  ⟨x²⟩(0)={out['stats']['mean_x_sq'][0]:.4f}  "
+        results_b[sigma_b] = {'out': out, 'plateau': plateau_emp,
+                              'plateau_std': plateau_std}
+        print(f"\n  [σ={sigma_b}]  ⟨x²⟩(0)={out['stats']['mean_x_sq'][0]:.4f}  "
               f"⟨x²⟩(τ_end)={out['stats']['mean_x_sq'][-1]:.4f}  "
-              f"plateau (mean of t>T/2) = {plateau_emp:.4f} ± {plateau_std:.4f}")
+              f"plateau (mean of t>n_iter/2) = {plateau_emp:.4f} ± {plateau_std:.4f}")
+
+    # ---- Panel (a): separate run at η = 0.05, σ = 0.05, τ_end = 1000 ----
+    ETA_A = 0.05
+    SIGMA_A = 0.05
+    N_ITER_A = int(round(1000 / ETA_A))  # 20_000
+    print(f"\n  Panel (a): η = {ETA_A}, σ = {SIGMA_A}, n_iter = {N_ITER_A}")
+    out_a = diagnose_langevin_tss_validity(
+        key=jax.random.PRNGKey(200),
+        num_iterations=N_ITER_A,
+        population_size=POP,
+        mutation_std=SIGMA_A,
+        learning_rate=ETA_A,
+        grad_func=grad_func,
+        init_bound=INIT_BOUND,
+        num_snapshots=101,
+    )
 
     # ============ Plot ============
     fig, axes = create_figure(n_cols=2, width_per_panel=5.4, height_per_panel=4.2)
 
-    # ---- (a) |x| histograms at multiple t from the η=0.05 run ----
-    eta_a = 0.05
+    # ---- (a) |x| histograms at τ ∈ {10, 100, 1000} from the η=0.05 run ----
     ax = axes[0]
-    out_a = results[eta_a]['out']
-    n_iter_a = results[eta_a]['n_iter']  # 20_000 for η=0.05, τ_end=1000
-    # Snapshots at τ = 10, 100, 1000 → iterations 200, 2000, 20000.
-    snapshot_steps = (int(10 / eta_a), int(100 / eta_a), n_iter_a)
+    # Snapshots at τ=10, 100, 1000 → iterations 200, 2000, 20000.
+    snapshot_steps = (int(10 / ETA_A), int(100 / ETA_A), N_ITER_A)
     snapshot_colors = ['#1f77b4', '#2ca02c', '#d62728']
     log_bins = np.logspace(-3, 1.5, 50)
     for t, color in zip(snapshot_steps, snapshot_colors):
         pop = out_a['snapshots'][t]
         abs_x = np.abs(pop[:, 0])
         abs_x = abs_x[abs_x > 0]
-        tau_label = t * eta_a
+        tau_label = t * ETA_A
         ax.hist(abs_x, bins=log_bins, density=True, histtype='step',
                 color=color, lw=2.0,
                 label=rf'$t={t:,}$  ($\tau={tau_label:.0f}$)')
@@ -486,24 +497,27 @@ def figure_2_singular_landscape():
     ax.set_yscale('log')
     ax.set_xlabel(r'$|x|$')
     ax.set_ylabel('Density')
-    ax.set_title(rf'Distribution of $|x|$ vs $t$  (2D EM, $\eta={eta_a}$)')
+    ax.set_title(rf'Distribution of $|x|$ vs $t$  (2D EM, $\eta={ETA_A}$, $\sigma={SIGMA_A}$)')
     ax.legend(loc='lower left', fontsize=8.5)
     style_axis(ax)
 
-    # ---- (b) ⟨x²⟩_pop(τ) for η ∈ {0.01, 0.05, 0.10}; all curves to τ_end ----
+    # ---- (b) ⟨x²⟩_pop(τ) at η=0.10 for σ ∈ {0.02, 0.05, 0.10} ----
     ax = axes[1]
-    color_map = {0.01: '#1f77b4', 0.05: '#2ca02c', 0.10: '#d62728'}
-    for eta in eta_values:
-        out = results[eta]['out']
-        tau = out['tau']
-        m = out['stats']['mean_x_sq']
-        ax.plot(tau, m, color=color_map[eta], lw=2.0,
-                label=rf'$\eta = {eta}$  (plateau $\approx {results[eta]["plateau"]:.3f}$)')
+    color_map = {0.02: '#1f77b4', 0.05: '#2ca02c', 0.10: '#d62728'}
+    for sigma_b in sigma_values:
+        r = results_b[sigma_b]
+        out = r['out']
+        ax.plot(out['tau'], out['stats']['mean_x_sq'], color=color_map[sigma_b], lw=2.0,
+                label=rf'$\sigma = {sigma_b}$  '
+                      rf'(plateau $\approx {r["plateau"]:.3f}\pm{r["plateau_std"]:.3f}$)')
 
     ax.set_xlabel(r'continuous time  $\tau = \eta\,t$')
     ax.set_ylabel(r'$\langle x^{2} \rangle_{\mathrm{pop}}$')
     ax.set_yscale('log')
-    ax.set_title(r'$\langle x^{2} \rangle(\tau)$: two-phase TSS pattern')
+    ax.set_title(
+        rf'$\langle x^{{2}}\rangle(\tau)$ at $\eta={ETA_B}$ '
+        rf'(archive params): $\sigma$-sweep'
+    )
     ax.legend(loc='best', fontsize=8.5)
     style_axis(ax)
 
