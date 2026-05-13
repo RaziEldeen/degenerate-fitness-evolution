@@ -452,11 +452,19 @@ def figure_2_singular_landscape():
               f"⟨x²⟩(τ_end)={out['stats']['mean_x_sq'][-1]:.4f}  "
               f"plateau (mean of t>n_iter/2) = {plateau_emp:.4f} ± {plateau_std:.4f}")
 
-    # ---- Panel (a): separate run at η = 0.05, σ = 0.05, τ_end = 1000 ----
+    # ---- Panel (a): separate run with narrower init for visible tail growth ----
+    # Tight init (init_bound=1) means walkers start in |x|,|y| ≤ 1; deterministic
+    # phase 1 keeps them inside that box (x²−y² conserved). Phase-2 diffusion
+    # then slowly spreads them — tail growth past |x|=1 is what we want to see.
+    # Long horizon (τ_end=1000) needed because diffusive tail growth at σ=0.05
+    # is slow: typical excursion at τ=1000 is √(2σ²·τ) ≈ 0.71.
+    # num_snapshots=101 → snap every 200 iters → covers τ ∈ {0, 10, 100, 1000}.
     ETA_A = 0.05
     SIGMA_A = 0.05
-    N_ITER_A = int(round(1000 / ETA_A))  # 20_000
-    print(f"\n  Panel (a): η = {ETA_A}, σ = {SIGMA_A}, n_iter = {N_ITER_A}")
+    INIT_BOUND_A = 1.0
+    N_ITER_A = 20_000
+    print(f"\n  Panel (a): η = {ETA_A}, σ = {SIGMA_A}, init_bound = {INIT_BOUND_A}, "
+          f"n_iter = {N_ITER_A}")
     out_a = diagnose_langevin_tss_validity(
         key=jax.random.PRNGKey(200),
         num_iterations=N_ITER_A,
@@ -464,18 +472,19 @@ def figure_2_singular_landscape():
         mutation_std=SIGMA_A,
         learning_rate=ETA_A,
         grad_func=grad_func,
-        init_bound=INIT_BOUND,
+        init_bound=INIT_BOUND_A,
         num_snapshots=101,
     )
 
     # ============ Plot ============
     fig, axes = create_figure(n_cols=2, width_per_panel=5.4, height_per_panel=4.2)
 
-    # ---- (a) |x| histograms at τ ∈ {10, 100, 1000} from the η=0.05 run ----
+    # ---- (a) |x| histograms at τ ∈ {0, 10, 100, 1000} ----
     ax = axes[0]
-    # Snapshots at τ=10, 100, 1000 → iterations 200, 2000, 20000.
-    snapshot_steps = (int(10 / ETA_A), int(100 / ETA_A), N_ITER_A)
-    snapshot_colors = ['#1f77b4', '#2ca02c', '#d62728']
+    # Snapshots at τ ∈ {0, 10, 100, 1000} → iter {0, 200, 2000, 20000}
+    # (all multiples of 200, the snapshot stride for linspace(0, 20000, 101)).
+    snapshot_steps = (0, int(10 / ETA_A), int(100 / ETA_A), N_ITER_A)
+    snapshot_colors = ['#404040', '#1f77b4', '#2ca02c', '#d62728']
     log_bins = np.logspace(-3, 1.5, 50)
     for t, color in zip(snapshot_steps, snapshot_colors):
         pop = out_a['snapshots'][t]
@@ -485,9 +494,6 @@ def figure_2_singular_landscape():
         ax.hist(abs_x, bins=log_bins, density=True, histtype='step',
                 color=color, lw=2.0,
                 label=rf'$t={t:,}$  ($\tau={tau_label:.0f}$)')
-    # Initial U(0, 3) density reference (initial pop is U(-3, 3) per axis)
-    ax.plot([1e-3, 3.0], [1.0/3.0, 1.0/3.0], color='gray', lw=1.5, ls=':',
-            label=r'Initial $|x_0|\sim U(0,3)$ (density $=1/3$)')
     # P*(x) ∝ 1/|x| slope reference
     ax.plot(log_bins, log_bins[10] / log_bins,
             color='black', lw=1.5, ls='--',
@@ -497,7 +503,10 @@ def figure_2_singular_landscape():
     ax.set_yscale('log')
     ax.set_xlabel(r'$|x|$')
     ax.set_ylabel('Density')
-    ax.set_title(rf'Distribution of $|x|$ vs $t$  (2D EM, $\eta={ETA_A}$, $\sigma={SIGMA_A}$)')
+    ax.set_title(
+        rf'Distribution of $|x|$ vs $t$  '
+        rf'($\eta={ETA_A}$, $\sigma={SIGMA_A}$, init$=U([-{INIT_BOUND_A:g},{INIT_BOUND_A:g}]^{{2}})$)'
+    )
     ax.legend(loc='lower left', fontsize=8.5)
     style_axis(ax)
 
