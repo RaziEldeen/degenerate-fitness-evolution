@@ -49,7 +49,7 @@ def create_landscape(Fmax: float, NS: int, NF: int, key: jax.Array, is_toy: bool
 
 def create_landscape_2d(Fmax=1.0):
     """2D fitness: f(x, y) = Fmax - 0.5 * x^2 * y^2"""
-    
+
     def loss_fn(params):
         x, y = params
         return Fmax - 0.5 * x**2 * y**2
@@ -57,7 +57,28 @@ def create_landscape_2d(Fmax=1.0):
     fitness_function = jax.jit(loss_fn)
     grad_fn = jax.jit(jax.grad(loss_fn))
     hessian_fn = jax.jit(jax.hessian(loss_fn))
-    
+
+    return fitness_function, hessian_fn, grad_fn
+
+
+def create_smooth_landscape_2d(Fmax=1.0):
+    """2D smooth fitness: f(x, y) = Fmax - 0.5 * x^2 * (1 + y^2)^2.
+
+    The effective curvature in the x-direction is g(y) = (1+y^2)^2, which
+    is bounded below by 1 (never zero). Used in the Langevin note to study
+    the finite-η stationary distribution P*(y) ∝ √(2 - η g(y)) / √g(y) on
+    a smooth landscape, as opposed to the singular landscape g(y) = y^2
+    of `create_landscape_2d`.
+    """
+
+    def loss_fn(params):
+        x, y = params
+        return Fmax - 0.5 * x**2 * (1.0 + y**2)**2
+
+    fitness_function = jax.jit(loss_fn)
+    grad_fn = jax.jit(jax.grad(loss_fn))
+    hessian_fn = jax.jit(jax.hessian(loss_fn))
+
     return fitness_function, hessian_fn, grad_fn
 
 
