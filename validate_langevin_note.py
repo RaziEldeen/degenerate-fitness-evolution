@@ -44,6 +44,7 @@ from plot_utils import (
     create_figure,
     add_subplot_labels,
 )
+from langevin_tss_validity import diagnose_langevin_tss_validity
 
 
 # Canonical parameters from the note (section 5.2 quantile table)
@@ -335,7 +336,17 @@ def figure_1_smooth_landscape():
 
 
 # =============================================================================
-# Figure 2: Singular landscape — non-normalizability and ⟨y²⟩(t)
+# Figure 2: Singular landscape — TSS two-phase ⟨x²⟩ pattern
+# =============================================================================
+#
+# Convention note (important): this figure uses the analysis.py /
+# langevin_tss_validity.py convention where *x* is the slow/TSS coord
+# and *y* is the fast coord — opposite to the rest of this file. The
+# landscape f = F_max − ½ x² y² is symmetric in (x, y), so the choice
+# is purely a labeling one; we follow the archived diagnostic so the
+# figure can be compared 1:1 to the older `langevin_tss_validity_*.jpeg`
+# plots committed under archive/older_langevin/. The §4.1 ⟨y²⟩ claim
+# in the note's text corresponds to ⟨x²⟩ here.
 # =============================================================================
 
 def make_reduced_u_runner(sigma, dt, stride, num_chunks):
@@ -380,153 +391,134 @@ def make_reduced_u_runner(sigma, dt, stride, num_chunks):
 
 
 def figure_2_singular_landscape():
-    """Two-panel: |y| histograms over time, and ⟨y²⟩(t) with three curves.
+    """TSS validity diagnostic on f = F_max − ½ x² y². Two panels:
 
-    Initial distribution y₀ ~ Uniform(-3, 3) gives ⟨y²⟩(0) = 3 — the
-    conservation value of the continuous-limit Itô martingale (note §4.1).
-    Three curves on the second panel:
-      • Continuous limit (1D reduced SDE, du = 2√(2σ²·u) dW in u=y² coords)
-        — expected to stay at ⟨y²⟩=3 (martingale).
-      • Full 2D EM at η = 0.01 — expected slight decrease via the §4.2
-        bracket 2σ²[1 − 2⟨1/(2−ηy²)⟩] < 0.
-      • Full 2D EM at η = 0.05 — same effect, more pronounced.
+      (a) |x| distribution snapshots vs t — the §4.1 picture (median collapse
+          while heavy tails grow), from the η=0.10 run.
+      (b) Empirical ⟨x²⟩_pop(τ) over continuous time τ = η·t for
+          η ∈ {0.01, 0.05, 0.10}. The §4.1 Itô martingale claim says ⟨x²⟩
+          should stop decreasing once the fast mode has equilibrated; we
+          read the plateau directly from the simulation (mean over the
+          second half of each run).
 
-    Panel (a) uses the 1D reduced SDE with |y₀| ~ Uniform(0, 3) (the same
-    initial second moment) to illustrate the §4.1 picture of median
-    collapsing toward 0 while heavy tails grow, with ⟨y²⟩ conserved.
+    Initial distribution: (x₀, y₀) ~ Uniform([-3, 3]²), so ⟨x²⟩(0) = 3.
+    The deterministic limit conserves x² − y², driving each walker to
+    either x≈0 (collapse) or y≈0 (the y=0 manifold); for x₀, y₀ ~ U(-3, 3)
+    iid the deterministic phase-1 prediction is
+        ⟨x²⟩_plateau, det = ½·E[|x₀² − y₀²|] = 3/2.
+    Noise + finite-η give η-dependent corrections.
+
+    Uses `langevin_tss_validity.diagnose_langevin_tss_validity` (brought
+    in from archive/older_langevin/).
     """
     print("\n" + "=" * 70)
-    print("Figure 2: Singular landscape g(y) = y²")
+    print("Figure 2: TSS validity on f = F_max − ½ x² y²")
     print("=" * 70)
 
-    N = 10_000
-    a_init, b_init = -3.0, 3.0
-    y2_conserved = (a_init**2 + a_init * b_init + b_init**2) / 3.0  # = 3.0
+    F_MAX = 10.0
+    _, _, grad_func = create_landscape_2d(F_MAX)
 
-    T_cont = 1000.0
-    dt_1d = 0.01
-    eta_values = (0.01, 0.05)
+    SIGMA_L = 0.05
+    INIT_BOUND = 3.0
+    POP = 1000
+    ITER = 10_000
+    eta_values = (0.01, 0.05, 0.10)
 
-    print(f"  Initial distribution: y₀ ~ Uniform({a_init}, {b_init})")
-    print(f"  Conservation value:   ⟨y²⟩(0) = (a² + ab + b²)/3 = {y2_conserved:.4f}")
-    print(f"  Common horizon:       T_cont = {T_cont}")
+    print(f"  σ = {SIGMA_L}, init_bound = {INIT_BOUND}, pop = {POP}, iter = {ITER}")
+    print(f"  η values = {eta_values}")
 
-    # ----------- Continuous limit: 1D reduced SDE in u = y² ----------------
-    n_steps_1d = int(T_cont / dt_1d)
-    stride_1d = 100
-    num_chunks_1d = n_steps_1d // stride_1d
+    # Deterministic phase-1 prediction: each walker preserves x²−y² and
+    # ends at either (sqrt(max(x₀²−y₀², 0)), 0) or (0, sqrt(max(y₀²−x₀², 0))).
+    # ⟨x²⟩_∞ = E[max(x₀² − y₀², 0)] = ½·E[|x₀² − y₀²|]. For x₀, y₀ ~ U(-3, 3)
+    # this evaluates analytically to 3/2 (∫∫_{0≤x,y≤3} |x²−y²| dxdy = 27).
+    det_plateau = 1.5
+    naive_plateau = INIT_BOUND**2 / 3.0  # ⟨x²⟩(0) = 3 for U(-3, 3)
+    print(f"  ⟨x²⟩(0)              = {naive_plateau:.4f}  (naive baseline)")
+    print(f"  Det. phase-1 plateau = {det_plateau:.4f}  (½·E[|x₀²-y₀²|])")
 
-    key = jax.random.PRNGKey(1)
-    key, k0, k1 = jax.random.split(key, 3)
-    y0_1d = jax.random.uniform(
-        k0, (N,), minval=a_init, maxval=b_init, dtype=jnp.float64
-    )
-    initial_u = y0_1d**2
-
-    keys_1d = jax.random.split(k1, N)
-    runner_1d = make_reduced_u_runner(SIGMA, dt_1d, stride_1d, num_chunks_1d)
-    _, u_traj = runner_1d(keys_1d, initial_u)
-    u_traj.block_until_ready()
-    u_traj = np.asarray(u_traj)
-
-    u_safe = np.where(np.isfinite(u_traj), u_traj, np.nan)
-    y2_mean_1d = np.nanmean(u_safe, axis=0)
-    t_axis_1d = np.arange(num_chunks_1d + 1) * stride_1d * dt_1d
-
-    delta_1d = y2_mean_1d[-1] - y2_mean_1d[0]
-    print(f"\n  [Continuous limit, dt={dt_1d}, n_steps={n_steps_1d}]")
-    print(f"    ⟨y²⟩(0) = {y2_mean_1d[0]:.4f}  ⟨y²⟩(T) = {y2_mean_1d[-1]:.4f}  "
-          f"Δ = {delta_1d:+.4f} ({100*delta_1d/y2_mean_1d[0]:+.2f} %)")
-
-    # ----------- Finite-η: full 2D EM ----------------
-    F_MAX = 5.0
-    _, _, grad_func_2d = create_landscape_2d(F_MAX)
-
-    results_2d = {}
+    results = {}
     for i, eta in enumerate(eta_values):
-        n_steps = int(T_cont / eta)
-        stride = max(1, n_steps // 1000)
-        num_chunks = n_steps // stride
-
-        key_eta = jax.random.PRNGKey(100 + i)
-        k_init, k_sim = jax.random.split(key_eta)
-        y0_2d = jax.random.uniform(
-            k_init, (N,), minval=a_init, maxval=b_init, dtype=jnp.float64
+        key = jax.random.PRNGKey(100 + i)
+        out = diagnose_langevin_tss_validity(
+            key=key,
+            num_iterations=ITER,
+            population_size=POP,
+            mutation_std=SIGMA_L,
+            learning_rate=eta,
+            grad_func=grad_func,
+            init_bound=INIT_BOUND,
+            num_snapshots=101,  # every 100 iters → covers 100, 1000, 10000 exactly
         )
-        x0_2d = jnp.zeros(N, dtype=jnp.float64)
-        initial_pop = jnp.stack([x0_2d, y0_2d], axis=1)
-
-        keys_2d = jax.random.split(k_sim, N)
-        runner_2d = make_em_runner(grad_func_2d, eta, SIGMA, stride, num_chunks)
-        _, trajs = runner_2d(keys_2d, initial_pop)
-        trajs.block_until_ready()
-
-        y_traj = np.asarray(trajs)[..., 1]
-        y2 = np.where(np.isfinite(y_traj), y_traj**2, np.nan)
-        y2_mean = np.nanmean(y2, axis=0)
-        t_axis = np.arange(num_chunks + 1) * stride * eta
-
-        results_2d[eta] = (t_axis, y2_mean)
-        delta = y2_mean[-1] - y2_mean[0]
-        print(f"\n  [2D EM η={eta}, n_steps={n_steps}]")
-        print(f"    ⟨y²⟩(0) = {y2_mean[0]:.4f}  ⟨y²⟩(T) = {y2_mean[-1]:.4f}  "
-              f"Δ = {delta:+.4f} ({100*delta/y2_mean[0]:+.2f} %)")
-
-    # ----------- Panel (a) snapshots from 1D reduced sim ----------------
-    snapshot_steps = (1_000, 10_000, 100_000)
-    snapshot_chunks = tuple(t // stride_1d for t in snapshot_steps)
-    abs_y_traj = np.sqrt(np.maximum(u_traj, 0.0))
-    snapshots = {t: abs_y_traj[:, c] for t, c in zip(snapshot_steps, snapshot_chunks)}
-    print()
-    for t, ys in snapshots.items():
-        finite = np.isfinite(ys)
-        print(f"    snapshot t={t:>6d}: median|y|={np.median(ys[finite]):.4f}, "
-              f"p95|y|={np.quantile(ys[finite], 0.95):.4f}")
+        burn = ITER // 2
+        plateau_emp = float(np.mean(out['stats']['mean_x_sq'][burn:]))
+        plateau_std = float(np.std(out['stats']['mean_x_sq'][burn:]))
+        results[eta] = {'out': out, 'plateau': plateau_emp, 'plateau_std': plateau_std}
+        print(f"\n  [η={eta}]  ⟨x²⟩(0)={out['stats']['mean_x_sq'][0]:.4f}  "
+              f"⟨x²⟩(T)={out['stats']['mean_x_sq'][-1]:.4f}  "
+              f"plateau (mean of t>T/2) = {plateau_emp:.4f} ± {plateau_std:.4f}")
 
     # ============ Plot ============
     fig, axes = create_figure(n_cols=2, width_per_panel=5.4, height_per_panel=4.2)
 
-    # (a) |y| histograms — 1D reduced sim, |y₀| ∼ U(0, 3)
+    # ---- (a) |x| histograms at multiple t from the η=0.10 run ----
     ax = axes[0]
+    out_a = results[0.10]['out']
+    snapshot_steps = (100, 1000, 10000)  # in EM-step units; τ = η·t
     snapshot_colors = ['#1f77b4', '#2ca02c', '#d62728']
-    log_bins = np.logspace(-3, 2, 60)
-    for (t, ys), color in zip(snapshots.items(), snapshot_colors):
-        abs_y = ys[np.isfinite(ys)]
-        abs_y = abs_y[abs_y > 0]
-        ax.hist(abs_y, bins=log_bins, density=True, histtype='step',
-                color=color, lw=2.0, label=f't = {t:,}')
-
-    # Initial uniform reference: U(0, 3) has density 1/3 on the support.
+    log_bins = np.logspace(-3, 1.5, 50)
+    for t, color in zip(snapshot_steps, snapshot_colors):
+        pop = out_a['snapshots'].get(t)
+        if pop is None:
+            # diagnose_langevin_tss_validity samples num_snapshots evenly; we
+            # asked for 4 → steps 0, ITER//3, 2·ITER//3, ITER. Fall back to
+            # closest available snapshot index.
+            idx_avail = sorted(out_a['snapshots'].keys())
+            nearest = min(idx_avail, key=lambda i: abs(i - t))
+            pop = out_a['snapshots'][nearest]
+            t_actual = nearest
+        else:
+            t_actual = t
+        abs_x = np.abs(pop[:, 0])
+        abs_x = abs_x[abs_x > 0]
+        tau_label = t_actual * 0.10
+        ax.hist(abs_x, bins=log_bins, density=True, histtype='step',
+                color=color, lw=2.0,
+                label=rf'$t={t_actual:,}$  ($\tau={tau_label:.0f}$)')
+    # Initial U(0, 3) density reference
     ax.plot([1e-3, 3.0], [1.0/3.0, 1.0/3.0], color='gray', lw=1.5, ls=':',
-            label=r'Initial $|y_0|\sim U(0,3)$ (density $=1/3$)')
-
-    # Continuous-limit prediction P*(y) ∝ 1/|y|, anchored near y=1.
-    ax.plot(log_bins, 1.0 / log_bins * log_bins[10],
+            label=r'Initial $|x_0|\sim U(0,3)$ (density $=1/3$)')
+    # P*(x) ∝ 1/|x| slope reference
+    ax.plot(log_bins, log_bins[10] / log_bins,
             color='black', lw=1.5, ls='--',
-            label=r'Continuous  $\propto 1/|y|$ (non-normalizable)')
+            label=r'$\propto 1/|x|$ (TSS quasi-stationary)')
 
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.set_xlabel(r'$|y|$')
+    ax.set_xlabel(r'$|x|$')
     ax.set_ylabel('Density')
-    ax.set_title(r'Distribution of $|y|$ vs $t$ (reduced 1D SDE)')
+    ax.set_title(r'Distribution of $|x|$ vs $t$  (2D EM, $\eta=0.10$)')
     ax.legend(loc='lower left', fontsize=8.5)
     style_axis(ax)
 
-    # (b) ⟨y²⟩(t) — three curves overlaid
+    # ---- (b) ⟨x²⟩_pop(τ) for η ∈ {0.01, 0.05, 0.10} ----
     ax = axes[1]
-    ax.plot(t_axis_1d, y2_mean_1d, color='#1f77b4', lw=2.0,
-            label=r'Continuous limit (1D SDE)')
-    color_map = {0.01: '#2ca02c', 0.05: '#d62728'}
+    color_map = {0.01: '#1f77b4', 0.05: '#2ca02c', 0.10: '#d62728'}
     for eta in eta_values:
-        t_axis, y2_mean = results_2d[eta]
-        ax.plot(t_axis, y2_mean, color=color_map[eta], lw=2.0,
-                label=rf'2D EM, $\eta = {eta}$')
-    ax.axhline(y2_conserved, color='black', lw=1.5, ls='--',
-               label=rf'$\langle y^{{2}}\rangle_{{0}} = 3$ (martingale value)')
-    ax.set_xlabel(r'continuous time  $t$')
-    ax.set_ylabel(r'$\langle y^{2} \rangle$')
-    ax.set_title(r'$\langle y^{2} \rangle(t)$: continuous-limit vs finite-$\eta$')
+        out = results[eta]['out']
+        tau = out['tau']
+        m = out['stats']['mean_x_sq']
+        ax.plot(tau, m, color=color_map[eta], lw=2.0,
+                label=rf'$\eta = {eta}$  (plateau $\approx {results[eta]["plateau"]:.3f}$)')
+
+    ax.axhline(naive_plateau, color='gray', lw=1.2, ls=':',
+               label=rf'$\langle x^{{2}}\rangle(0) = {naive_plateau:.2f}$')
+    ax.axhline(det_plateau, color='black', lw=1.5, ls='--',
+               label=rf'Det. phase-1 prediction $= {det_plateau:.2f}$')
+
+    ax.set_xlabel(r'continuous time  $\tau = \eta\,t$')
+    ax.set_ylabel(r'$\langle x^{2} \rangle_{\mathrm{pop}}$')
+    ax.set_yscale('log')
+    ax.set_title(r'$\langle x^{2} \rangle(\tau)$: two-phase TSS pattern')
     ax.legend(loc='best', fontsize=8.5)
     style_axis(ax)
 
