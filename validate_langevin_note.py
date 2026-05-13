@@ -421,70 +421,60 @@ def figure_2_singular_landscape():
     SIGMA_L = 0.05
     INIT_BOUND = 3.0
     POP = 1000
-    ITER = 10_000
+    T_CONTINUOUS = 1000.0
     eta_values = (0.01, 0.05, 0.10)
 
-    print(f"  σ = {SIGMA_L}, init_bound = {INIT_BOUND}, pop = {POP}, iter = {ITER}")
-    print(f"  η values = {eta_values}")
-
-    # Deterministic phase-1 prediction: each walker preserves x²−y² and
-    # ends at either (sqrt(max(x₀²−y₀², 0)), 0) or (0, sqrt(max(y₀²−x₀², 0))).
-    # ⟨x²⟩_∞ = E[max(x₀² − y₀², 0)] = ½·E[|x₀² − y₀²|]. For x₀, y₀ ~ U(-3, 3)
-    # this evaluates analytically to 3/2 (∫∫_{0≤x,y≤3} |x²−y²| dxdy = 27).
-    det_plateau = 1.5
-    naive_plateau = INIT_BOUND**2 / 3.0  # ⟨x²⟩(0) = 3 for U(-3, 3)
-    print(f"  ⟨x²⟩(0)              = {naive_plateau:.4f}  (naive baseline)")
-    print(f"  Det. phase-1 plateau = {det_plateau:.4f}  (½·E[|x₀²-y₀²|])")
+    print(f"  σ = {SIGMA_L}, init_bound = {INIT_BOUND}, pop = {POP}")
+    print(f"  Common horizon: τ_end = {T_CONTINUOUS}")
+    print(f"  η values = {eta_values}  →  num_iterations = τ_end/η each")
 
     results = {}
     for i, eta in enumerate(eta_values):
+        n_iter = int(round(T_CONTINUOUS / eta))
         key = jax.random.PRNGKey(100 + i)
+        # 101 evenly-spaced snapshots → indices [0, n_iter/100, 2·n_iter/100, …,
+        # n_iter]. Covers τ=10, 100, 1000 exactly when n_iter is a multiple of
+        # 100, which is true for all our η values.
         out = diagnose_langevin_tss_validity(
             key=key,
-            num_iterations=ITER,
+            num_iterations=n_iter,
             population_size=POP,
             mutation_std=SIGMA_L,
             learning_rate=eta,
             grad_func=grad_func,
             init_bound=INIT_BOUND,
-            num_snapshots=101,  # every 100 iters → covers 100, 1000, 10000 exactly
+            num_snapshots=101,
         )
-        burn = ITER // 2
+        burn = n_iter // 2
         plateau_emp = float(np.mean(out['stats']['mean_x_sq'][burn:]))
         plateau_std = float(np.std(out['stats']['mean_x_sq'][burn:]))
-        results[eta] = {'out': out, 'plateau': plateau_emp, 'plateau_std': plateau_std}
-        print(f"\n  [η={eta}]  ⟨x²⟩(0)={out['stats']['mean_x_sq'][0]:.4f}  "
-              f"⟨x²⟩(T)={out['stats']['mean_x_sq'][-1]:.4f}  "
+        results[eta] = {'out': out, 'plateau': plateau_emp, 'plateau_std': plateau_std,
+                        'n_iter': n_iter}
+        print(f"\n  [η={eta}, n_iter={n_iter}]  ⟨x²⟩(0)={out['stats']['mean_x_sq'][0]:.4f}  "
+              f"⟨x²⟩(τ_end)={out['stats']['mean_x_sq'][-1]:.4f}  "
               f"plateau (mean of t>T/2) = {plateau_emp:.4f} ± {plateau_std:.4f}")
 
     # ============ Plot ============
     fig, axes = create_figure(n_cols=2, width_per_panel=5.4, height_per_panel=4.2)
 
-    # ---- (a) |x| histograms at multiple t from the η=0.10 run ----
+    # ---- (a) |x| histograms at multiple t from the η=0.05 run ----
+    eta_a = 0.05
     ax = axes[0]
-    out_a = results[0.10]['out']
-    snapshot_steps = (100, 1000, 10000)  # in EM-step units; τ = η·t
+    out_a = results[eta_a]['out']
+    n_iter_a = results[eta_a]['n_iter']  # 20_000 for η=0.05, τ_end=1000
+    # Snapshots at τ = 10, 100, 1000 → iterations 200, 2000, 20000.
+    snapshot_steps = (int(10 / eta_a), int(100 / eta_a), n_iter_a)
     snapshot_colors = ['#1f77b4', '#2ca02c', '#d62728']
     log_bins = np.logspace(-3, 1.5, 50)
     for t, color in zip(snapshot_steps, snapshot_colors):
-        pop = out_a['snapshots'].get(t)
-        if pop is None:
-            # diagnose_langevin_tss_validity samples num_snapshots evenly; we
-            # asked for 4 → steps 0, ITER//3, 2·ITER//3, ITER. Fall back to
-            # closest available snapshot index.
-            idx_avail = sorted(out_a['snapshots'].keys())
-            nearest = min(idx_avail, key=lambda i: abs(i - t))
-            pop = out_a['snapshots'][nearest]
-            t_actual = nearest
-        else:
-            t_actual = t
+        pop = out_a['snapshots'][t]
         abs_x = np.abs(pop[:, 0])
         abs_x = abs_x[abs_x > 0]
-        tau_label = t_actual * 0.10
+        tau_label = t * eta_a
         ax.hist(abs_x, bins=log_bins, density=True, histtype='step',
                 color=color, lw=2.0,
-                label=rf'$t={t_actual:,}$  ($\tau={tau_label:.0f}$)')
-    # Initial U(0, 3) density reference
+                label=rf'$t={t:,}$  ($\tau={tau_label:.0f}$)')
+    # Initial U(0, 3) density reference (initial pop is U(-3, 3) per axis)
     ax.plot([1e-3, 3.0], [1.0/3.0, 1.0/3.0], color='gray', lw=1.5, ls=':',
             label=r'Initial $|x_0|\sim U(0,3)$ (density $=1/3$)')
     # P*(x) ∝ 1/|x| slope reference
@@ -496,11 +486,11 @@ def figure_2_singular_landscape():
     ax.set_yscale('log')
     ax.set_xlabel(r'$|x|$')
     ax.set_ylabel('Density')
-    ax.set_title(r'Distribution of $|x|$ vs $t$  (2D EM, $\eta=0.10$)')
+    ax.set_title(rf'Distribution of $|x|$ vs $t$  (2D EM, $\eta={eta_a}$)')
     ax.legend(loc='lower left', fontsize=8.5)
     style_axis(ax)
 
-    # ---- (b) ⟨x²⟩_pop(τ) for η ∈ {0.01, 0.05, 0.10} ----
+    # ---- (b) ⟨x²⟩_pop(τ) for η ∈ {0.01, 0.05, 0.10}; all curves to τ_end ----
     ax = axes[1]
     color_map = {0.01: '#1f77b4', 0.05: '#2ca02c', 0.10: '#d62728'}
     for eta in eta_values:
@@ -509,11 +499,6 @@ def figure_2_singular_landscape():
         m = out['stats']['mean_x_sq']
         ax.plot(tau, m, color=color_map[eta], lw=2.0,
                 label=rf'$\eta = {eta}$  (plateau $\approx {results[eta]["plateau"]:.3f}$)')
-
-    ax.axhline(naive_plateau, color='gray', lw=1.2, ls=':',
-               label=rf'$\langle x^{{2}}\rangle(0) = {naive_plateau:.2f}$')
-    ax.axhline(det_plateau, color='black', lw=1.5, ls='--',
-               label=rf'Det. phase-1 prediction $= {det_plateau:.2f}$')
 
     ax.set_xlabel(r'continuous time  $\tau = \eta\,t$')
     ax.set_ylabel(r'$\langle x^{2} \rangle_{\mathrm{pop}}$')
