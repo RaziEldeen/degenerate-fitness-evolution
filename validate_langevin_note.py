@@ -36,7 +36,7 @@ import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
 
-from objective_function import create_smooth_landscape_2d
+from objective_function import create_landscape_2d, create_smooth_landscape_2d
 from plot_utils import (
     setup_style,
     save_figure,
@@ -350,10 +350,12 @@ def make_reduced_u_runner(sigma, dt, stride, num_chunks):
     that destabilizes the y-form's EM near y≈0, and the martingale property
     is preserved in expectation per step: E[u_{n+1}|u_n] = u_n.
 
-    A reflecting boundary u_{n+1} ← |u_n + step| keeps u ≥ 0 (the underlying
-    BES(0) process is absorbing at 0, but on the simulation horizons we use
-    the absorption time-scale y₀²/(2σ²) is much longer than the integration
-    so reflection vs absorption matters only at the % level).
+    Absorbing boundary at u=0: u_{n+1} ← max(0, u_n + step). This matches
+    the underlying BES(0) process, which hits 0 in finite time a.s. and is
+    absorbed there. By optional stopping, E[u(t)] = u₀ for all t even after
+    some walkers have been absorbed (the surviving population concentrates
+    on larger u to compensate for the zero contribution of absorbed ones —
+    this is the §4.1 picture of "median collapses, heavy tails grow").
     """
     noise_coef_sq = 2.0 * sigma * sigma * dt
 
@@ -362,7 +364,7 @@ def make_reduced_u_runner(sigma, dt, stride, num_chunks):
         k, sub = jax.random.split(k)
         xi = jax.random.normal(sub, shape=(), dtype=u.dtype)
         step_u = 2.0 * jnp.sqrt(noise_coef_sq * jnp.maximum(u, 0.0)) * xi
-        new_u = jnp.abs(u + step_u)  # reflecting at 0
+        new_u = jnp.maximum(0.0, u + step_u)  # absorbing at 0
         return (new_u, k), None
 
     def chunk(state, _):
@@ -378,100 +380,128 @@ def make_reduced_u_runner(sigma, dt, stride, num_chunks):
 
 
 def figure_2_singular_landscape():
-    """Two-panel: |y| histograms over time, and ⟨y²⟩(t) conservation.
+    """Two-panel: |y| histograms over time, and ⟨y²⟩(t) with three curves.
 
-    Validates note §4.1: for g(y)=y², in the continuous-time limit ⟨y²⟩ is
-    an exact Itô martingale on the adiabatically-reduced y-dynamics. The
-    relevant conservation value is *⟨y²⟩(0) of the initial population*,
-    not the square of any single y₀ — we make this distinction visible by
-    initializing from a spread distribution |y₀| ~ Uniform(a, b), so the
-    conservation reference is the nontrivial constant ⟨y²⟩(0)=(a²+ab+b²)/3.
+    Initial distribution y₀ ~ Uniform(-3, 3) gives ⟨y²⟩(0) = 3 — the
+    conservation value of the continuous-limit Itô martingale (note §4.1).
+    Three curves on the second panel:
+      • Continuous limit (1D reduced SDE, du = 2√(2σ²·u) dW in u=y² coords)
+        — expected to stay at ⟨y²⟩=3 (martingale).
+      • Full 2D EM at η = 0.01 — expected slight decrease via the §4.2
+        bracket 2σ²[1 − 2⟨1/(2−ηy²)⟩] < 0.
+      • Full 2D EM at η = 0.05 — same effect, more pronounced.
 
-    Integration is done in u = y² coordinates where the SDE becomes
-    du = 2√(2σ²·u) dW (driftless), avoiding the −σ²/y singularity of the
-    y-form. The full 2D EM at finite η fails this test because heavy-tail
-    kicks ∝ 1/y² near y≈0 drive ⟨y²⟩ upward (an EM discretization artifact,
-    not a property of the continuous dynamics).
+    Panel (a) uses the 1D reduced SDE with |y₀| ~ Uniform(0, 3) (the same
+    initial second moment) to illustrate the §4.1 picture of median
+    collapsing toward 0 while heavy tails grow, with ⟨y²⟩ conserved.
     """
     print("\n" + "=" * 70)
     print("Figure 2: Singular landscape g(y) = y²")
     print("=" * 70)
 
-    n_walkers = 10_000
-    dt = 1e-3
-    n_steps = 100_000
-    stride = 100
-    num_chunks = n_steps // stride
-    T_total = n_steps * dt
-    snapshot_steps = (1_000, 10_000, 100_000)
-    snapshot_chunks = tuple(t // stride for t in snapshot_steps)
+    N = 10_000
+    a_init, b_init = -3.0, 3.0
+    y2_conserved = (a_init**2 + a_init * b_init + b_init**2) / 3.0  # = 3.0
 
-    # Spread initial distribution: |y₀| ~ Uniform(a, b) → ⟨y²⟩(0) = (a²+ab+b²)/3
-    a_init, b_init = 0.5, 1.5
-    y2_conserved = (a_init**2 + a_init * b_init + b_init**2) / 3.0
+    T_cont = 1000.0
+    dt_1d = 0.01
+    eta_values = (0.01, 0.05)
 
-    print(f"  Parameters: σ={SIGMA}, dt={dt}, N={n_walkers}, n_steps={n_steps} "
-          f"(T_cont = {T_total})")
-    print(f"  Reduced SDE (in u=y²):  du = 2√(2σ²·u) dW   (note §4.1)")
-    print(f"  Initial dist:  |y₀| ~ Uniform({a_init}, {b_init})")
-    print(f"  Theory ⟨y²⟩(0) = (a² + ab + b²)/3 = {y2_conserved:.6f}")
-    print(f"  Snapshot steps = {snapshot_steps}")
+    print(f"  Initial distribution: y₀ ~ Uniform({a_init}, {b_init})")
+    print(f"  Conservation value:   ⟨y²⟩(0) = (a² + ab + b²)/3 = {y2_conserved:.4f}")
+    print(f"  Common horizon:       T_cont = {T_cont}")
+
+    # ----------- Continuous limit: 1D reduced SDE in u = y² ----------------
+    n_steps_1d = int(T_cont / dt_1d)
+    stride_1d = 100
+    num_chunks_1d = n_steps_1d // stride_1d
 
     key = jax.random.PRNGKey(1)
-    key, k1 = jax.random.split(key, 2)
-    abs_y0 = jax.random.uniform(
-        k1, (n_walkers,), minval=a_init, maxval=b_init, dtype=jnp.float64
+    key, k0, k1 = jax.random.split(key, 3)
+    y0_1d = jax.random.uniform(
+        k0, (N,), minval=a_init, maxval=b_init, dtype=jnp.float64
     )
-    initial_u = abs_y0**2  # u = y² ≥ 0
+    initial_u = y0_1d**2
 
-    keys = jax.random.split(key, n_walkers)
-    runner = make_reduced_u_runner(SIGMA, dt, stride, num_chunks)
-    _, u_traj = runner(keys, initial_u)
+    keys_1d = jax.random.split(k1, N)
+    runner_1d = make_reduced_u_runner(SIGMA, dt_1d, stride_1d, num_chunks_1d)
+    _, u_traj = runner_1d(keys_1d, initial_u)
     u_traj.block_until_ready()
-    print(f"  Trajectory tensor: {u_traj.shape}, dtype={u_traj.dtype}")
-
     u_traj = np.asarray(u_traj)
-    n_nonfinite = (~np.isfinite(u_traj)).sum()
-    if n_nonfinite:
-        print(f"  WARNING: {n_nonfinite} non-finite samples across trajectory")
 
-    # ⟨y²⟩(t) = ⟨u⟩(t)
     u_safe = np.where(np.isfinite(u_traj), u_traj, np.nan)
-    y2_mean_t = np.nanmean(u_safe, axis=0)
-    time_axis = np.arange(num_chunks + 1) * stride
+    y2_mean_1d = np.nanmean(u_safe, axis=0)
+    t_axis_1d = np.arange(num_chunks_1d + 1) * stride_1d * dt_1d
 
-    y2_init_emp = y2_mean_t[0]
-    y2_final = y2_mean_t[-1]
-    print(f"\n  ⟨y²⟩(0)              = {y2_init_emp:.6f}  (theory: {y2_conserved:.6f})")
-    print(f"  ⟨y²⟩(T={n_steps})       = {y2_final:.6f}")
-    print(f"  Δ⟨y²⟩                = {y2_final - y2_init_emp:+.6f}  "
-          f"({100*(y2_final - y2_init_emp)/y2_init_emp:+.2f} %)")
-    print(f"  (Continuous-limit prediction: 0 — exact Itô martingale.)")
+    delta_1d = y2_mean_1d[-1] - y2_mean_1d[0]
+    print(f"\n  [Continuous limit, dt={dt_1d}, n_steps={n_steps_1d}]")
+    print(f"    ⟨y²⟩(0) = {y2_mean_1d[0]:.4f}  ⟨y²⟩(T) = {y2_mean_1d[-1]:.4f}  "
+          f"Δ = {delta_1d:+.4f} ({100*delta_1d/y2_mean_1d[0]:+.2f} %)")
 
-    # Snapshots: convert u→|y|
+    # ----------- Finite-η: full 2D EM ----------------
+    F_MAX = 5.0
+    _, _, grad_func_2d = create_landscape_2d(F_MAX)
+
+    results_2d = {}
+    for i, eta in enumerate(eta_values):
+        n_steps = int(T_cont / eta)
+        stride = max(1, n_steps // 1000)
+        num_chunks = n_steps // stride
+
+        key_eta = jax.random.PRNGKey(100 + i)
+        k_init, k_sim = jax.random.split(key_eta)
+        y0_2d = jax.random.uniform(
+            k_init, (N,), minval=a_init, maxval=b_init, dtype=jnp.float64
+        )
+        x0_2d = jnp.zeros(N, dtype=jnp.float64)
+        initial_pop = jnp.stack([x0_2d, y0_2d], axis=1)
+
+        keys_2d = jax.random.split(k_sim, N)
+        runner_2d = make_em_runner(grad_func_2d, eta, SIGMA, stride, num_chunks)
+        _, trajs = runner_2d(keys_2d, initial_pop)
+        trajs.block_until_ready()
+
+        y_traj = np.asarray(trajs)[..., 1]
+        y2 = np.where(np.isfinite(y_traj), y_traj**2, np.nan)
+        y2_mean = np.nanmean(y2, axis=0)
+        t_axis = np.arange(num_chunks + 1) * stride * eta
+
+        results_2d[eta] = (t_axis, y2_mean)
+        delta = y2_mean[-1] - y2_mean[0]
+        print(f"\n  [2D EM η={eta}, n_steps={n_steps}]")
+        print(f"    ⟨y²⟩(0) = {y2_mean[0]:.4f}  ⟨y²⟩(T) = {y2_mean[-1]:.4f}  "
+              f"Δ = {delta:+.4f} ({100*delta/y2_mean[0]:+.2f} %)")
+
+    # ----------- Panel (a) snapshots from 1D reduced sim ----------------
+    snapshot_steps = (1_000, 10_000, 100_000)
+    snapshot_chunks = tuple(t // stride_1d for t in snapshot_steps)
     abs_y_traj = np.sqrt(np.maximum(u_traj, 0.0))
     snapshots = {t: abs_y_traj[:, c] for t, c in zip(snapshot_steps, snapshot_chunks)}
+    print()
     for t, ys in snapshots.items():
         finite = np.isfinite(ys)
         print(f"    snapshot t={t:>6d}: median|y|={np.median(ys[finite]):.4f}, "
-              f"p95|y|={np.quantile(ys[finite], 0.95):.4f}, "
-              f"n_finite={finite.sum()}/{ys.size}")
+              f"p95|y|={np.quantile(ys[finite], 0.95):.4f}")
 
-    # === Plot ===
-    fig, axes = create_figure(n_cols=2, width_per_panel=5.2, height_per_panel=4.2)
+    # ============ Plot ============
+    fig, axes = create_figure(n_cols=2, width_per_panel=5.4, height_per_panel=4.2)
 
-    # (a) |y| histograms at snapshot times (log-log)
+    # (a) |y| histograms — 1D reduced sim, |y₀| ∼ U(0, 3)
     ax = axes[0]
     snapshot_colors = ['#1f77b4', '#2ca02c', '#d62728']
-    abs_y_range = (1e-3, 1e2)
-    log_bins = np.logspace(np.log10(abs_y_range[0]), np.log10(abs_y_range[1]), 60)
+    log_bins = np.logspace(-3, 2, 60)
     for (t, ys), color in zip(snapshots.items(), snapshot_colors):
         abs_y = ys[np.isfinite(ys)]
         abs_y = abs_y[abs_y > 0]
         ax.hist(abs_y, bins=log_bins, density=True, histtype='step',
                 color=color, lw=2.0, label=f't = {t:,}')
 
-    ax.plot(log_bins, 1.0 / log_bins * (log_bins[10]),
+    # Initial uniform reference: U(0, 3) has density 1/3 on the support.
+    ax.plot([1e-3, 3.0], [1.0/3.0, 1.0/3.0], color='gray', lw=1.5, ls=':',
+            label=r'Initial $|y_0|\sim U(0,3)$ (density $=1/3$)')
+
+    # Continuous-limit prediction P*(y) ∝ 1/|y|, anchored near y=1.
+    ax.plot(log_bins, 1.0 / log_bins * log_bins[10],
             color='black', lw=1.5, ls='--',
             label=r'Continuous  $\propto 1/|y|$ (non-normalizable)')
 
@@ -479,25 +509,25 @@ def figure_2_singular_landscape():
     ax.set_yscale('log')
     ax.set_xlabel(r'$|y|$')
     ax.set_ylabel('Density')
-    ax.set_title(
-        rf'Distribution of $|y|$ vs $t$ ($|y_0|\sim U({a_init},{b_init})$)'
-    )
-    ax.legend(loc='best', fontsize=9)
+    ax.set_title(r'Distribution of $|y|$ vs $t$ (reduced 1D SDE)')
+    ax.legend(loc='lower left', fontsize=8.5)
     style_axis(ax)
 
-    # (b) ⟨y²⟩(t)
+    # (b) ⟨y²⟩(t) — three curves overlaid
     ax = axes[1]
-    ax.plot(time_axis, y2_mean_t, color='#8c564b', lw=2.0,
-            label='Empirical (reduced 1D SDE in $u=y^{2}$)')
-    ax.axhline(
-        y2_conserved, color='black', lw=2.0, ls='--',
-        label=(rf'Conservation: $\langle y^{{2}}\rangle_{{0}}'
-               rf' = (a^{{2}}+ab+b^{{2}})/3 = {y2_conserved:.4f}$'),
-    )
-    ax.set_xlabel('step $n$')
+    ax.plot(t_axis_1d, y2_mean_1d, color='#1f77b4', lw=2.0,
+            label=r'Continuous limit (1D SDE)')
+    color_map = {0.01: '#2ca02c', 0.05: '#d62728'}
+    for eta in eta_values:
+        t_axis, y2_mean = results_2d[eta]
+        ax.plot(t_axis, y2_mean, color=color_map[eta], lw=2.0,
+                label=rf'2D EM, $\eta = {eta}$')
+    ax.axhline(y2_conserved, color='black', lw=1.5, ls='--',
+               label=rf'$\langle y^{{2}}\rangle_{{0}} = 3$ (martingale value)')
+    ax.set_xlabel(r'continuous time  $t$')
     ax.set_ylabel(r'$\langle y^{2} \rangle$')
-    ax.set_title(r'$\langle y^{2} \rangle(t)$: Itô martingale (continuous limit)')
-    ax.legend(loc='best', fontsize=9)
+    ax.set_title(r'$\langle y^{2} \rangle(t)$: continuous-limit vs finite-$\eta$')
+    ax.legend(loc='best', fontsize=8.5)
     style_axis(ax)
 
     add_subplot_labels(axes)
