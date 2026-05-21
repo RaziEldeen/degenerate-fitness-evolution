@@ -895,8 +895,8 @@ def plot_ed_vs_full_nes_summary(
     
     Args:
         ed_populations: Dictionary mapping time -> ED population array
-        ed_statistics: Tuple from run_evolution (time, positions, fitness, hessian, covariance)
-        full_nes_statistics: Tuple from run_full_natural_gradient_es
+        ed_statistics: Tuple from simulate_evolution (time, positions, fitness, hessian, covariance)
+        full_nes_statistics: Tuple from simulate_full_natural_gradient_es
         fitness_function: Fitness function for contour plots
         snapshot_times: List of time points to show in scatter plots
         params: Dictionary with parameters (num_iterations, population_size, mutation_std, etc.)
@@ -1106,9 +1106,9 @@ def plot_dynamics_theory_vs_empirical(
       (c) theory ellipses on fitness landscape
     
     Args:
-        ed_statistics: Tuple from run_evolution (time, positions, fitness, hessian, covariance)
-        full_nes_statistics: Tuple from run_full_natural_gradient_es
-        theory_statistics: Tuple from run_manifold_dynamics_theoretical (time, mu, a, b)
+        ed_statistics: Tuple from simulate_evolution (time, positions, fitness, hessian, covariance)
+        full_nes_statistics: Tuple from simulate_full_natural_gradient_es
+        theory_statistics: Tuple from simulate_theoretical_manifold_dynamics (time, mu, a, b)
         fitness_function: Fitness function for contour plots
         params: Dictionary with simulation parameters
         save_fig: Whether to save the figure
@@ -1255,10 +1255,10 @@ def plot_mu_theory_and_mutation_std(
     Plot μ_t vs time (theory vs empirical) alongside mutation std trajectory and curvature.
     
     Args:
-        ed_statistics: Tuple or list of tuples from run_evolution
-        theory_statistics: Tuple or list of tuples from run_manifold_dynamics_theoretical
-        full_nes_statistics: Optional tuple from run_full_natural_gradient_es
-        mutation_comparison_results: Dict from run_mutation_std_comparison
+        ed_statistics: Tuple or list of tuples from simulate_evolution
+        theory_statistics: Tuple or list of tuples from simulate_theoretical_manifold_dynamics
+        full_nes_statistics: Optional tuple from simulate_full_natural_gradient_es
+        mutation_comparison_results: Dict from compare_mutation_std
         fitness_function: Fitness function for contour plots
         params: Optional dict for naming metadata
         mu_sigmas: Optional list of sigma values for μ_t series coloring
@@ -1395,10 +1395,10 @@ def plot_ed_gd_sgd_populations(
     save_fig: bool = True
 ):
     """
-    Plot results from run_ed_gd_sgd_comparison.
+    Plot results from compare_ed_gd_sgd.
     
     Args:
-        comparison_results: Dictionary returned by run_ed_gd_sgd_comparison
+        comparison_results: Dictionary returned by compare_ed_gd_sgd
         fitness_function: Fitness function for contour plots
         save_fig: Whether to save the figure
     """
@@ -1446,9 +1446,359 @@ def plot_ed_gd_sgd_populations(
         population_size = params['population_size']
         mutation_std = params['mutation_std']
         beta = params['beta']
-        filename = f"ed_gd_sgd_populations_iter{num_iterations}_pop{population_size}_mut{mutation_std:.3f}_beta{beta:.2f}.jpeg"
+        gld_tag = params.get('gld_noise_type', 'additive')
+        filename = f"ed_gd_sgd_populations_iter{num_iterations}_pop{population_size}_mut{mutation_std:.3f}_beta{beta:.2f}_gld-{gld_tag}.jpeg"
         save_figure(fig, filename)
     
+    return fig
+
+
+def plot_langevin_vs_gradient_flow(
+    results: Dict,
+    fitness_function=None,
+    F_MAX: float = 10.0,
+    save_fig: bool = True,
+    show: bool = True,
+):
+    """
+    Visualise the timescale-separated gradient-flow theory against an
+    Euler-Maruyama Langevin simulation produced by
+    `analysis.compare_langevin_to_gradient_flow`.
+
+    Layout (3 panels):
+      (a) median |x|^2 vs continuous time tau, with the gradient-flow theory
+          x_0^2 - 2 sigma^2 tau overlaid; the noisy-gradient run is shown
+          alongside as a contrast (its drift is suppressed by eta).
+      (b) <y^2> vs tau, with the quasi-stationary prediction
+          V_y(x_theory) = sigma^2 / x_theory^2 overlaid.
+      (c) 2D snapshots of the Langevin ensemble at several times, with the
+          deterministic gradient-flow trajectory along the y=0 manifold drawn
+          on top.
+    """
+    setup_style()
+
+    params = results['params']
+    tau = results['tau']
+    iters = results['iterations']
+    lan = results['langevin']
+    ng = results.get('noisy_gradient')
+    th = results['theory']
+    snaps = results['snapshots']['langevin']
+
+    sigma2 = params['sigma2']
+    sigma = params['mutation_std']
+    eta = params['learning_rate']
+    x0 = params['x0']
+
+    # When Langevin theory hits zero, mark that visually.
+    t_star_lan = (x0 ** 2) / (2.0 * sigma2)  # in continuous time tau
+
+    # Colors
+    lan_color = get_algorithm_color(AlgorithmEnum.SHIFT_GRADIENT_ASCENT)  # blue
+    ng_color = get_algorithm_color(AlgorithmEnum.GRADIENT_ASCENT)         # brown
+    theory_color = 'black'
+
+    fig, axes = create_figure(n_cols=3, width_per_panel=4.2, height_per_panel=3.6)
+    ax_a, ax_b, ax_c = axes
+
+    # ---------------- Panel (a): |x|^2 vs tau ----------------
+    ax_a.plot(tau, lan['median_x_sq'], color=lan_color, lw=2.0,
+              label=r'Langevin: median $x^2$', zorder=4)
+    ax_a.fill_between(tau, lan['p25_x_sq'], lan['p75_x_sq'],
+                      color=lan_color, alpha=0.2, zorder=2,
+                      label=r'Langevin: IQR')
+
+    if ng is not None:
+        ax_a.plot(tau, ng['median_x_sq'], color=ng_color, lw=2.0, ls='-',
+                  label=r'Noisy-gradient: median $x^2$', zorder=3)
+        ax_a.fill_between(tau, ng['p25_x_sq'], ng['p75_x_sq'],
+                          color=ng_color, alpha=0.15, zorder=1)
+
+    ax_a.plot(tau, th['langevin_x_sq'], color=theory_color, lw=2.0, ls='--',
+              label=r'Theory: $x_0^2-2\sigma^2\tau$', zorder=5)
+
+    if ng is not None:
+        ax_a.plot(tau, th['noisy_gradient_x_sq'], color=theory_color, lw=1.2, ls=':',
+                  label=r'Theory (NG): $x_0^2-\eta\sigma^2\tau$', zorder=5)
+
+    if t_star_lan < tau[-1]:
+        ax_a.axvline(t_star_lan, color='gray', lw=0.8, ls=':', zorder=0)
+
+    # TSS validity band: x^2 ~ sigma (i.e. |x| ~ sqrt(sigma)).
+    ax_a.axhline(sigma, color='gray', lw=0.7, ls=':', alpha=0.7, zorder=0)
+    ax_a.text(tau[-1] * 0.98, sigma * 1.4, r'TSS breaks: $x^2\sim\sigma$',
+              ha='right', va='bottom', color='gray', fontsize=8)
+
+    ax_a.set_xlabel(r'continuous time $\tau=\eta t$', fontsize=11)
+    ax_a.set_ylabel(r'$x^2$', fontsize=11)
+    ax_a.set_title(r'Slow-mode drift vs gradient-flow theory', fontsize=11)
+    ax_a.set_yscale('log')
+    ax_a.set_ylim(max(1e-3, sigma * 0.1), x0 ** 2 * 1.5)
+    ax_a.legend(fontsize=8, loc='lower left', framealpha=0.9)
+    style_axis(ax_a)
+
+    # ---------------- Panel (b): conditional E[y^2 | x] vs theory ----------------
+    # Direct test of the quasi-stationary FDT-like relation:
+    # bin pooled (x_t, y_t^2) across trajectories AND times in the TSS window,
+    # plot the bin-mean of y^2 vs |x|, overlay V_y(x) = sigma^2/x^2.
+    cVy = results['conditional_Vy']
+    valid = ~np.isnan(cVy['mean_y_sq'])
+    ax_b.scatter(cVy['x_bin_centers'][valid], cVy['mean_y_sq'][valid],
+                 s=36, color=lan_color, edgecolor='white', linewidth=0.6,
+                 zorder=5, label=r'Langevin: empirical $\mathbb{E}[y^2\mid|x|]$')
+
+    xt = cVy['x_bin_centers']
+    ax_b.plot(xt, cVy['theory_continuous'], color=theory_color, lw=2.0, ls='--',
+              label=r'Theory: $V_y=\sigma^2/x^2$', zorder=6)
+    ax_b.plot(xt, cVy['theory_finite_eta'], color=theory_color, lw=1.0, ls=':',
+              label=r'Theory finite-$\eta$: $\sigma^2/[x^2(1-\eta x^2/2)]$',
+              zorder=6)
+
+    # TSS validity boundary
+    ax_b.axvline(np.sqrt(sigma), color='gray', lw=0.8, ls=':', zorder=0)
+    ax_b.text(np.sqrt(sigma) * 1.05, 0.96, r'$|x|=\sqrt{\sigma}$',
+              color='gray', fontsize=8, rotation=90,
+              transform=ax_b.get_xaxis_transform(),
+              va='top', ha='left')
+
+    ax_b.set_xscale('log')
+    ax_b.set_yscale('log')
+    ax_b.set_xlabel(r'$|x|$', fontsize=11)
+    ax_b.set_ylabel(r'$\mathbb{E}[y^2\mid|x|]$', fontsize=11)
+    ax_b.set_title(r'Fast-mode quasi-stationary $V_y(x)$', fontsize=11)
+    ax_b.legend(fontsize=8, loc='lower left', framealpha=0.9)
+    style_axis(ax_b)
+
+    # ---------------- Panel (c): 2D snapshots ----------------
+    if fitness_function is not None:
+        add_fitness_contours(ax_c, fitness_function, xlim=(-x0 * 1.2, x0 * 1.2),
+                             ylim=(-x0 * 0.6, x0 * 0.6), vmin=0, vmax=F_MAX)
+
+    # Color map across snapshots (gradient from start to end)
+    snap_items = sorted(snaps.items())
+    cmap = plt.cm.viridis
+    for idx, (t_idx, pop) in enumerate(snap_items):
+        c = cmap(idx / max(1, len(snap_items) - 1))
+        ax_c.scatter(np.asarray(pop[:, 0]), np.asarray(pop[:, 1]),
+                     s=6, alpha=0.35, color=c, zorder=3,
+                     label=fr'$\tau={float(t_idx) * eta:.1f}$')
+
+    # Deterministic gradient-flow trajectory along the y=0 manifold
+    tau_dense = np.linspace(0.0, min(tau[-1], 0.999 * t_star_lan), 400)
+    x_flow = np.sqrt(np.maximum(x0 ** 2 - 2.0 * sigma2 * tau_dense, 0.0))
+    ax_c.plot(x_flow, np.zeros_like(x_flow), color=theory_color, lw=2.0, ls='--',
+              label='gradient flow', zorder=5)
+    ax_c.plot(-x_flow, np.zeros_like(x_flow), color=theory_color, lw=2.0, ls='--',
+              zorder=5)
+
+    ax_c.set_xlim(-x0 * 1.2, x0 * 1.2)
+    ax_c.set_ylim(-x0 * 0.6, x0 * 0.6)
+    ax_c.set_xlabel(r'$x$', fontsize=11)
+    ax_c.set_ylabel(r'$y$', fontsize=11)
+    ax_c.set_title(r'Population vs deterministic flow', fontsize=11)
+    ax_c.legend(fontsize=7, loc='upper right', framealpha=0.9, ncol=2)
+    style_axis(ax_c)
+    set_equal_aspect(ax_c)
+
+    add_subplot_labels(axes, y_offset=1.06)
+    adjust_layout(fig, left=0.07, right=0.98, top=0.92, bottom=0.13,
+                  wspace=0.32, hspace=0.30)
+
+    if show:
+        plt.show()
+
+    if save_fig:
+        filename = (
+            f"langevin_vs_gradflow"
+            f"_x0{x0:.2f}_sigma{sigma:.3f}_eta{eta:.3f}"
+            f"_pop{params['population_size']}_iter{params['num_iterations']}.jpeg"
+        )
+        save_figure(fig, filename)
+
+    return fig
+
+
+def plot_langevin_tss_validity(
+    results: Dict,
+    fitness_function=None,
+    F_MAX: float = 10.0,
+    save_fig: bool = True,
+    show: bool = True,
+):
+    """
+    Visualise the Langevin TSS-validity diagnostic produced by
+    `analysis.diagnose_langevin_tss_validity`.
+
+    Layout (2 rows, 2 cols):
+      (a) Conditional drift <Delta x / eta | |x|> vs theory -sigma^2/x.
+          Marks the TSS breakdown |x| ~ sqrt(sigma).
+      (b) Conditional fast-mode variance E[y^2 | |x|] vs theory sigma^2/x^2.
+      (c) The "no-collapse" puzzle: <x^2>_pop(t) and median(x^2)(t) over
+          time, against the TSS Ito martingale prediction <x^2>_t = const.
+      (d) Final 2D population overlaid on the fitness landscape, with the
+          TSS-breakdown square |x|, |y| < sqrt(sigma) shaded at the origin.
+    """
+    setup_style()
+
+    p = results['params']
+    sigma = p['mutation_std']
+    sigma2 = p['sigma2']
+    eta = p['learning_rate']
+    sqrt_sigma = p['sqrt_sigma']
+    init_bound = p['init_bound']
+    init_xsq = p['init_x_sq_mean']
+
+    iters = results['iterations']
+    tau = results['tau']
+    stats = results['stats']
+    cond = results['conditional']
+    snaps = results['snapshots']
+    final_pop = np.asarray(results['final_population'])
+
+    lan_color = get_algorithm_color(AlgorithmEnum.SHIFT_GRADIENT_ASCENT)
+    theory_color = 'black'
+
+    fig, axes = create_figure(n_cols=2, n_rows=2,
+                              width_per_panel=4.6, height_per_panel=3.6)
+    ax_a, ax_b = axes[0]
+    ax_c, ax_d = axes[1]
+
+    # ---- (a) Conditional drift profile ----
+    valid = ~np.isnan(cond['mean_dx'])
+    ax_a.scatter(cond['x_bin_centers'][valid], -cond['mean_dx'][valid],
+                 s=42, color=lan_color, edgecolor='white', linewidth=0.6,
+                 zorder=5,
+                 label=r'Empirical $-\mathrm{sgn}(x)\,\langle\Delta x\rangle$')
+    ax_a.plot(cond['x_bin_centers'], -cond['drift_theory_continuous'],
+              color=theory_color, lw=2.0, ls='--', zorder=6,
+              label=r'TSS theory: $\eta\sigma^2/|x|$')
+    ax_a.axvline(sqrt_sigma, color='red', lw=1.0, ls=':', zorder=2)
+    ax_a.text(sqrt_sigma * 1.06, 0.96, r'$|x|=\sqrt{\sigma}$',
+              color='red', fontsize=8, rotation=90,
+              transform=ax_a.get_xaxis_transform(), va='top', ha='left')
+    ax_a.set_xscale('log')
+    ax_a.set_yscale('log')
+    ax_a.set_xlabel(r'$|x|$', fontsize=11)
+    ax_a.set_ylabel(r'$-\mathrm{sgn}(x)\,\langle\Delta x\rangle$', fontsize=11)
+    ax_a.set_title(r'Drift profile vs TSS theory', fontsize=11)
+    ax_a.legend(fontsize=8, loc='lower left', framealpha=0.9)
+    style_axis(ax_a)
+
+    # ---- (b) Conditional E[y^2 | |x|] ----
+    valid = ~np.isnan(cond['mean_y_sq'])
+    ax_b.scatter(cond['x_bin_centers'][valid], cond['mean_y_sq'][valid],
+                 s=42, color=lan_color, edgecolor='white', linewidth=0.6,
+                 zorder=5,
+                 label=r'Empirical $\mathbb{E}[y^2\mid|x|]$')
+    ax_b.plot(cond['x_bin_centers'], cond['Vy_theory_continuous'],
+              color=theory_color, lw=2.0, ls='--', zorder=6,
+              label=r'TSS theory: $\sigma^2/x^2$')
+    ax_b.plot(cond['x_bin_centers'], cond['Vy_theory_finite_eta'],
+              color=theory_color, lw=1.0, ls=':', zorder=6,
+              label=r'finite-$\eta$: $\sigma^2/[x^2(1-\eta x^2/2)]$')
+    ax_b.axvline(sqrt_sigma, color='red', lw=1.0, ls=':', zorder=2)
+    ax_b.text(sqrt_sigma * 1.06, 0.96, r'$|x|=\sqrt{\sigma}$',
+              color='red', fontsize=8, rotation=90,
+              transform=ax_b.get_xaxis_transform(), va='top', ha='left')
+    ax_b.set_xscale('log')
+    ax_b.set_yscale('log')
+    ax_b.set_xlabel(r'$|x|$', fontsize=11)
+    ax_b.set_ylabel(r'$\mathbb{E}[y^2\mid|x|]$', fontsize=11)
+    ax_b.set_title(r'Quasi-stationary $V_y(x)$', fontsize=11)
+    ax_b.legend(fontsize=8, loc='lower left', framealpha=0.9)
+    style_axis(ax_b)
+
+    # ---- (c) The "no-collapse" puzzle: mean and median x^2 over time ----
+    # The dynamics has two phases:
+    #   (1) off-manifold slide: <x^2> decreases as trajectories descend
+    #       toward the y = 0 axis (the bare gradient -eta x y^2 dominates).
+    #   (2) on-manifold TSS regime: y has equilibrated to V_y(x) = sigma^2/x^2,
+    #       and <x^2> becomes a martingale (Ito): the entropic drift -sigma^2/x
+    #       exactly cancels the direct x-diffusion in mean square. So <x^2>
+    #       stops decreasing while the *median* x^2 keeps collapsing under
+    #       gradient flow on the entropic potential.
+    burn_in_iter = cond.get('burn_in_iter', len(tau) // 2)
+    burn_in_tau = burn_in_iter * eta
+    plateau_x_sq = float(np.mean(stats['mean_x_sq'][burn_in_iter:]))
+
+    ax_c.axvspan(0, burn_in_tau, color='orange', alpha=0.10, zorder=0)
+    ax_c.text(burn_in_tau * 0.5, 1.7 * init_xsq, 'off-manifold\ntransient',
+              fontsize=8, ha='center', va='top', color='darkorange')
+    ax_c.text(burn_in_tau + (tau[-1] - burn_in_tau) * 0.5, 1.7 * init_xsq,
+              'on-manifold TSS regime\n(Itô martingale)',
+              fontsize=8, ha='center', va='top', color='dimgray')
+
+    ax_c.plot(tau, stats['mean_x_sq'], color=lan_color, lw=2.0,
+              label=r'Empirical $\langle x^2\rangle_{\rm pop}$', zorder=5)
+    ax_c.plot(tau, stats['median_x_sq'], color=lan_color, lw=1.6, ls='--',
+              alpha=0.8, label=r'Empirical median $x^2$', zorder=4)
+
+    # Plateau line: martingale prediction for the on-manifold regime
+    ax_c.hlines(plateau_x_sq, burn_in_tau, tau[-1],
+                color=theory_color, lw=2.0, ls=':',
+                label=rf'TSS Itô plateau $\approx{plateau_x_sq:.2f}$',
+                zorder=6)
+
+    # Deterministic gradient-flow (median-track) prediction for a reference
+    # particle that started at x = sqrt(<x_0^2>):
+    grad_flow_x_sq = np.maximum(init_xsq - 2.0 * sigma2 * tau, 0.0)
+    ax_c.plot(tau, grad_flow_x_sq, color='gray', lw=1.2, ls='--',
+              label=r'Det.\ gradient flow: $\langle x_0^2\rangle-2\sigma^2\tau$',
+              zorder=3)
+
+    ax_c.set_xlabel(r'continuous time $\tau=\eta t$', fontsize=11)
+    ax_c.set_ylabel(r'$x^2$', fontsize=11)
+    ax_c.set_title(r'Why no collapse? Itô martingale resolution', fontsize=11)
+    ax_c.set_yscale('log')
+    ax_c.set_ylim(max(1e-2, 0.5 * sigma), init_xsq * 3.0)
+    ax_c.legend(fontsize=8, loc='lower left', framealpha=0.9)
+    style_axis(ax_c)
+
+    # ---- (d) Final population and TSS-validity region ----
+    if fitness_function is not None:
+        add_fitness_contours(ax_d, fitness_function,
+                             xlim=(-init_bound * 1.05, init_bound * 1.05),
+                             ylim=(-init_bound * 1.05, init_bound * 1.05),
+                             vmin=0, vmax=F_MAX)
+
+    # Shade TSS-breakdown square at origin: |x|, |y| < sqrt(sigma)
+    breakdown = mpatches.Rectangle(
+        (-sqrt_sigma, -sqrt_sigma), 2 * sqrt_sigma, 2 * sqrt_sigma,
+        facecolor='red', alpha=0.18, edgecolor='red', lw=1.0, zorder=2,
+        label=r'TSS breakdown $|x|,|y|<\sqrt{\sigma}$',
+    )
+    ax_d.add_patch(breakdown)
+
+    # Final population
+    scatter_population(ax_d, final_pop, color=lan_color, alpha=0.25, size=8,
+                       zorder=3)
+
+    ax_d.set_xlim(-init_bound * 1.05, init_bound * 1.05)
+    ax_d.set_ylim(-init_bound * 1.05, init_bound * 1.05)
+    ax_d.set_xlabel(r'$x$', fontsize=11)
+    ax_d.set_ylabel(r'$y$', fontsize=11)
+    ax_d.set_title(
+        rf'Final population at $\tau={tau[-1]:.0f}$ + TSS-breakdown',
+        fontsize=11)
+    ax_d.legend(fontsize=8, loc='upper right', framealpha=0.9)
+    style_axis(ax_d)
+    set_equal_aspect(ax_d)
+
+    add_subplot_labels(np.asarray([ax_a, ax_b, ax_c, ax_d]), y_offset=1.06)
+    adjust_layout(fig, left=0.08, right=0.97, top=0.93, bottom=0.08,
+                  wspace=0.30, hspace=0.40)
+
+    if show:
+        plt.show()
+
+    if save_fig:
+        filename = (
+            f"langevin_tss_validity"
+            f"_sigma{sigma:.3f}_eta{eta:.3f}"
+            f"_box{init_bound:.1f}_pop{p['population_size']}_iter{p['num_iterations']}.jpeg"
+        )
+        save_figure(fig, filename)
+
     return fig
 
 

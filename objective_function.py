@@ -61,6 +61,37 @@ def create_landscape_2d(Fmax=1.0):
     return fitness_function, hessian_fn, grad_fn
 
 
+def create_landscape_2d_confining(Fmax: float = 1.0):
+    r"""
+    2D fitness: f(x, y) = Fmax - 0.5 * x^2 * (1 + y^2)^2.
+
+    The optimal manifold is the entire y-axis (x = 0). The fast (sharp)
+    direction is x everywhere, with curvature |H_xx| = (1 + y^2)^2 that grows
+    with |y| (the opposite of the x^2 y^2 case, where the sharp curvature is
+    largest near the origin of the manifold).
+
+    The Euler-Maruyama Langevin timescale-separated theory yields:
+        V_x(y) = sigma^2 / (1 + y^2)^2          (quasi-stationary fast variance)
+        d<y>/dtau = -2 sigma^2 y / (1 + y^2)    (slow-mode entropic drift)
+    which is gradient flow on the *confining* entropic potential
+        F_eff(y) = sigma^2 ln(1 + y^2).
+    The stationary distribution along the manifold is therefore the
+    standard Cauchy:
+        p^*(y) = (1/pi) / (1 + y^2).
+    Median |y| = 1; E[y^2] is divergent (heavy Cauchy tails).
+    """
+
+    def loss_fn(params):
+        x, y = params
+        return Fmax - 0.5 * x ** 2 * (1.0 + y ** 2) ** 2
+
+    fitness_function = jax.jit(loss_fn)
+    grad_fn = jax.jit(jax.grad(loss_fn))
+    hessian_fn = jax.jit(jax.hessian(loss_fn))
+
+    return fitness_function, hessian_fn, grad_fn
+
+
 # =============================================================================
 # JAX-based expected gradient and Hessian functions
 # =============================================================================

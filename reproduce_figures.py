@@ -18,9 +18,22 @@ Usage:
     python reproduce_figures.py --all        # All figures
     python reproduce_figures.py --list       # List available figures
     python reproduce_figures.py              # Interactive mode
+
+Figure numbering matches the current state of the manuscript and supplementary:
+    Main:  Fig 2 (mean dynamics), Fig 3 (theory vs empirical), Fig 4 (ED/GLD/SGD).
+    Supp:  S1 (curvature-drift vs N transition),
+           S2 (ED-linear vs NES), S3 (ED-multiplicative vs NES),
+           S4 (ED-Boltzmann vs NES),
+           S5 (high-D ED: sigma comparison),
+           S6 (high-D ED: variance/curvature alignment).
+    S5 and S6 share a single generator (generate_high_dim_ed_figure) but each
+    FIGURES entry calls it with a `figures` argument that runs only the
+    simulations needed for that panel.
 """
 
 import argparse
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 
@@ -29,18 +42,18 @@ import matplotlib.pyplot as plt
 
 # Import core algorithms
 from algorithms import (
-    run_evolution,
-    run_evolution_with_snapshots,
-    run_full_natural_gradient_es,
-    run_multiplicative_natural_gradient_es,
-    run_exponential_natural_gradient_es,
-    run_manifold_dynamics_theoretical,
+    simulate_evolution,
+    simulate_evolution_with_snapshots,
+    simulate_full_natural_gradient_es,
+    simulate_multiplicative_natural_gradient_es,
+    simulate_exponential_natural_gradient_es,
+    simulate_theoretical_manifold_dynamics,
 )
 
 # Import analysis functions
 from analysis import (
-    run_mutation_std_comparison,
-    run_ed_gd_sgd_comparison,
+    compare_mutation_std,
+    compare_ed_gd_sgd,
 )
 
 # Import plotting utilities
@@ -52,7 +65,6 @@ from plot_utils import (
     plot_high_dim_sigma_comparison,
     plot_ed_gd_sgd_populations,
     plot_mu_theory_and_mutation_std,
-    plot_curvature_and_fitness_histograms,
     get_colors_for_values,
     compute_covariance_hessian_alignment,
     plot_alignment_and_anticorrelation_summary,
@@ -61,16 +73,45 @@ from plot_utils import (
 # Import objective functions
 from objective_function import create_landscape_2d, create_landscape
 
+# Supplementary S1: finite-population curvature-drift transition.
+# The simulation/plot lives in verify_dominance.py and also dumps two extra
+# diagnostic plots (mu0 sweep, data collapse) alongside the supp figure.
+from verify_dominance import run_curvature_drift_transition
 
-def run_ed_vs_full_nes():
+
+def generate_curvature_drift_transition_figure():
     """
-    Figure S1 (Supplementary): ED vs Full Natural Gradient ES.
-    
-    Compares Evolutionary Dynamics with Full NES and generates a comprehensive
-    comparison plot showing population snapshots and trajectory evolution.
+    Figure S1 (Supplementary): Finite-population transition between
+    curvature-driven and noise-dominated dynamics.
+
+    Sweeps the population size N at fixed initial mean and mutation strength,
+    measuring the mean drift toward the flat region and its coefficient of
+    variation. Marks the predicted crossover N* where the curvature drift
+    velocity equals the genetic-drift noise scale (D = 1).
+
+    Note: the underlying routine in verify_dominance.py also generates two
+    diagnostic plots (curvature_drift_mu0_sweep.png and
+    curvature_drift_data_collapse.png) that are not in the supplementary;
+    only curvature_drift_transition.png is the supp S1 figure.
     """
     print("\n" + "=" * 60)
-    print("Figure S1: ED vs Full NES Comparison")
+    print("Figure S1: Curvature-drift vs genetic-drift transition")
+    print("=" * 60)
+    run_curvature_drift_transition()
+    print("[Done] Curvature-drift transition figure generated!")
+
+
+def generate_ed_vs_full_nes_figure():
+    """
+    Figure S2 (Supplementary): ED (Linear selection) vs Full Natural Gradient ES.
+
+    Compares Evolutionary Dynamics with Full NES and generates a comprehensive
+    comparison plot showing population snapshots and trajectory evolution.
+    Corresponds to the supplementary figure labeled fig:EDvsTheory_linear
+    (NESvsLinearED.png).
+    """
+    print("\n" + "=" * 60)
+    print("Figure S2: ED (Linear) vs Full NES Comparison")
     print("=" * 60)
     
     # Parameters
@@ -91,7 +132,7 @@ def run_ed_vs_full_nes():
     # Run ED with snapshots
     key, ed_key = jax.random.split(key)
     print(f"Running ED with population snapshots at t={SNAPSHOT_TIMES}...")
-    ed_stats, ed_final_pop, ed_snapshots = run_evolution_with_snapshots(
+    ed_stats, ed_final_pop, ed_snapshots = simulate_evolution_with_snapshots(
         key=ed_key,
         initial_mean=initial_mean,
         num_iterations=max(SNAPSHOT_TIMES),
@@ -108,7 +149,7 @@ def run_ed_vs_full_nes():
     
     # Run Full NES
     print("Running Full NES for comparison...")
-    full_nes_stats = run_full_natural_gradient_es(
+    full_nes_stats = simulate_full_natural_gradient_es(
         initial_mean=initial_mean,
         initial_std=MUTATION_STD,
         mutation_std=MUTATION_STD,
@@ -143,7 +184,7 @@ def run_ed_vs_full_nes():
     return ed_stats, full_nes_stats
 
 
-def run_theory_vs_empirical():
+def generate_theory_vs_empirical_figure():
     """
     Figure 3 (Main Text): Theoretical vs Empirical Dynamics.
     
@@ -170,7 +211,7 @@ def run_theory_vs_empirical():
     # Run ED
     key, ed_key = jax.random.split(key)
     print("Running ED simulation...")
-    ed_stats, _, _ = run_evolution(
+    ed_stats, _, _ = simulate_evolution(
         key=ed_key,
         initial_mean=initial_mean,
         num_iterations=NUM_ITERATIONS,
@@ -187,7 +228,7 @@ def run_theory_vs_empirical():
     
     # Run Full NES
     print("Running Full NES simulation...")
-    full_nes_stats = run_full_natural_gradient_es(
+    full_nes_stats = simulate_full_natural_gradient_es(
         initial_mean=initial_mean,
         initial_std=MUTATION_STD,
         mutation_std=MUTATION_STD,
@@ -200,7 +241,7 @@ def run_theory_vs_empirical():
     # Run theoretical dynamics
     print("Computing theoretical trajectory...")
     initial_mu = float(initial_mean[0])
-    theory_stats = run_manifold_dynamics_theoretical(
+    theory_stats = simulate_theoretical_manifold_dynamics(
         initial_mu=initial_mu,
         initial_a=SIGMA,
         initial_b=SIGMA,
@@ -210,7 +251,7 @@ def run_theory_vs_empirical():
         m_y=SIGMA
     )
     print("Computing extended theoretical trajectory for panel (c)...")
-    theory_stats_long = run_manifold_dynamics_theoretical(
+    theory_stats_long = simulate_theoretical_manifold_dynamics(
         initial_mu=initial_mu,
         initial_a=SIGMA,
         initial_b=SIGMA,
@@ -253,7 +294,7 @@ def run_theory_vs_empirical():
     return ed_stats, theory_stats
 
 
-def run_ed_gd_sgd():
+def generate_ed_gd_sgd_figure():
     """
     Figure 4 (Main Text): ED vs GLD vs SGD Populations.
     
@@ -267,7 +308,7 @@ def run_ed_gd_sgd():
     
     # Parameters
     POPULATION_SIZE = 1000
-    NUM_ITERATIONS = 10000
+    NUM_ITERATIONS = 100000
     MUTATION_STD = 0.05
 
     BETA = 0.1
@@ -280,7 +321,7 @@ def run_ed_gd_sgd():
     initial_population = jax.random.uniform(key, shape=(POPULATION_SIZE, 2), minval=-3.0, maxval=3.0)
     
     # Run comparison
-    comparison_results = run_ed_gd_sgd_comparison(
+    comparison_results = compare_ed_gd_sgd(
         key=key,
         initial_mean=initial_mean,
         num_iterations=NUM_ITERATIONS,
@@ -306,246 +347,141 @@ def run_ed_gd_sgd():
     return comparison_results
 
 
-def run_steady_state_histogram():
+def generate_high_dim_ed_figure(figures: str = 'both'):
     """
-    Figure S4 (Supplementary): Steady-State Histograms.
-    
-    Runs ED with a large population and plots steady-state distributions
-    of curvature and fitness values.
-    """
-    print("\n" + "=" * 60)
-    print("Figure S4: Steady-State Histograms (Large Population)")
-    print("=" * 60)
-    
-    # Parameters
-    POPULATION_SIZE = 100000
-    NUM_ITERATIONS = 1000
-    MUTATION_STD = 0.1
-    BETA = 0.1
-    F_MAX = 10.0
-    SIGMA = MUTATION_STD**2
-    
-    # Setup
-    key = jax.random.PRNGKey(42)
-    fitness_func, hessian_func, _ = create_landscape_2d(F_MAX)
-    initial_mean = jnp.array([2.0, 0.0])
-    
-    # Run ED (JAX-based)
-    print("Running ED for steady-state distribution...")
-    _, _, ed_final_pop = run_evolution(
-        key=key,
-        initial_mean=initial_mean,
-        num_iterations=NUM_ITERATIONS,
-        population_size=POPULATION_SIZE,
-        sigma=SIGMA,
-        num_select=POPULATION_SIZE,
-        fitness_function=fitness_func,
-        hessian_func=hessian_func,
-        selection_method='linear',
-        beta=BETA,
-        track_hessian=True,
-        M=1
-    )
-    
-    # Curvature and fitness histograms
-    ed_hessians = jax.vmap(hessian_func)(ed_final_pop)
-    ed_eigvals = jnp.linalg.eigvalsh(ed_hessians)
-    ed_curvatures = jnp.sum(jnp.abs(ed_eigvals), axis=1)
-    ed_fitnesses = jax.vmap(fitness_func)(ed_final_pop)
-    fig = plot_curvature_and_fitness_histograms(
-        final_population_curvatures=np.asarray(jax.device_get(ed_curvatures)),
-        final_population_fitnesses=np.asarray(jax.device_get(ed_fitnesses)),
-        bins=50
-    )
-    save_figure(fig, f"steady_state_histograms_pop{POPULATION_SIZE}_iter{NUM_ITERATIONS}_mut{MUTATION_STD:.3f}", format='png')
-    print("[Done] Steady-state histograms generated!")
-    return ed_final_pop
+    Supplementary High-D Evolutionary Dynamics figures.
 
+    Two supplementary figures live in this routine because they share the
+    same high-D landscape construction, but their simulations are
+    independent:
+      - S5 (fig:highD_sigma):  sigma comparison across three mutation rates.
+                               Filename: high_dim_sigma_comparison_NF20_NS10_iter100.png
+      - S6 (fig:align_anticorr): variance/curvature alignment for the middle
+                                 sigma, using a snapshotted run.
+                                 Filename: alignment_anticorrelation_NF20_NS10_iter100_*
 
-def run_high_dim_steady_state_histogram():
+    Args:
+        figures: 'both' (default), 's5', or 's6'. Only the simulations and
+            plots needed for the requested figure(s) are executed.
     """
-    Figure S6 (Supplementary): High-D Steady-State Histograms.
-    
-    Runs ED on a high-dimensional landscape and plots steady-state
-    distributions of curvature and fitness values.
-    """
+    figures = figures.lower()
+    if figures not in {'both', 's5', 's6'}:
+        raise ValueError(f"figures must be 'both', 's5', or 's6'; got {figures!r}")
+    want_s5 = figures in {'both', 's5'}
+    want_s6 = figures in {'both', 's6'}
+
     print("\n" + "=" * 60)
-    print("Figure S6: High-D Steady-State Histograms")
+    label_parts = []
+    if want_s5:
+        label_parts.append("S5 sigma comparison")
+    if want_s6:
+        label_parts.append("S6 variance/curvature alignment")
+    print(f"High-D ED: {' + '.join(label_parts)}")
     print("=" * 60)
-    
+
     # High-D landscape parameters
     NF = 20  # flat directions (x)
     NS = 10  # sharp directions (y)
     F_MAX = 10.0
-    
-    # ED parameters
-    POPULATION_SIZE = 100000
-    NUM_ITERATIONS = 1000
-    MUTATION_STD = 0.1
-    BETA = 0.1
-    SIGMA = MUTATION_STD**2
-    BATCH_SIZE = 2000
-    
-    # Setup
-    key = jax.random.PRNGKey(123)
-    fitness_func, hessian_func, _ = create_landscape(Fmax=F_MAX, NS=NS, NF=NF, key=key)
-    initial_x = jnp.ones(NF) * 0.5
-    initial_y = jnp.ones(NS) * 0.5
-    initial_mean = jnp.concatenate([initial_x, initial_y])
-    
-    print(f"Running high-D ED (D={NF + NS}) for steady-state histograms...")
-    _, _, ed_final_pop = run_evolution(
-        key=key,
-        initial_mean=initial_mean,
-        num_iterations=NUM_ITERATIONS,
-        population_size=POPULATION_SIZE,
-        sigma=SIGMA,
-        num_select=POPULATION_SIZE,
-        fitness_function=fitness_func,
-        hessian_func=hessian_func,
-        selection_method='linear',
-        beta=BETA,
-        track_hessian=True,
-        M=1
-    )
-    
-    # Compute curvature and fitness in batches to reduce memory pressure
-    num_batches = int(np.ceil(POPULATION_SIZE / BATCH_SIZE))
-    curvatures_list = []
-    fitnesses_list = []
-    
-    for batch_idx in range(num_batches):
-        start = batch_idx * BATCH_SIZE
-        end = min((batch_idx + 1) * BATCH_SIZE, POPULATION_SIZE)
-        batch = ed_final_pop[start:end]
-        
-        batch_hessians = jax.vmap(hessian_func)(batch)
-        batch_eigvals = jnp.linalg.eigvalsh(batch_hessians)
-        batch_curvatures = jnp.sum(jnp.abs(batch_eigvals), axis=1)
-        batch_fitnesses = jax.vmap(fitness_func)(batch)
-        
-        curvatures_list.append(jax.device_get(batch_curvatures))
-        fitnesses_list.append(jax.device_get(batch_fitnesses))
-    
-    curvatures = np.concatenate(curvatures_list, axis=0)
-    fitnesses = np.concatenate(fitnesses_list, axis=0)
-    
-    fig = plot_curvature_and_fitness_histograms(
-        final_population_curvatures=curvatures,
-        final_population_fitnesses=fitnesses,
-        bins=50
-    )
-    save_figure(fig, f"high_dim_steady_state_histograms_D{NF + NS}_pop{POPULATION_SIZE}_iter{NUM_ITERATIONS}_mut{MUTATION_STD:.3f}", format='png')
-    
-    print("[Done] High-D steady-state histograms generated!")
-    return ed_final_pop
 
-
-def run_high_dim_ed():
-    """
-    Figure S5 (Supplementary): High-D Evolutionary Dynamics.
-    
-    Runs ED on a high-dimensional landscape with NF flat directions and
-    NS sharp directions, plotting fitness, curvature, and covariance alignment.
-    """
-    print("\n" + "=" * 60)
-    print("Figure S5: High-D ED (NF flat, NS sharp)")
-    print("=" * 60)
-    
-    # High-D landscape parameters
-    NF = 20  # flat directions (x)
-    NS = 10  # sharp directions (y)
-    F_MAX = 10.0
-    
     # ED parameters
     POPULATION_SIZE = 5000
     NUM_ITERATIONS = 100
     BETA = 0.1
     MUTATION_STD_VALUES = [0.01, 0.05, 0.1]
     SIGMA_VALUES = [mutation_std**2 for mutation_std in MUTATION_STD_VALUES]
-    
-    # Setup
+
+    # Setup (same RNG seed and landscape for both figures so they remain consistent)
     key = jax.random.PRNGKey(123)
     fitness_func, hessian_func, _ = create_landscape(Fmax=F_MAX, NS=NS, NF=NF, key=key)
     initial_x = jnp.ones(NF) * 0.5
     initial_y = jnp.ones(NS) * 0.5
     initial_mean = jnp.concatenate([initial_x, initial_y])
-    
-    print(f"Running ED in {NF + NS}D (NF={NF}, NS={NS})...")
-    print(f"Comparing sigma values: {MUTATION_STD_VALUES}")
-    sigma_colors = get_colors_for_values(MUTATION_STD_VALUES)
-    sigma_color_map = {}
-    sigma_results = {}
-    
-    for mutation_std, sigma_var, color in zip(MUTATION_STD_VALUES, SIGMA_VALUES, sigma_colors):
-        key, sigma_key = jax.random.split(key)
-        label = f"σ = {mutation_std:.2f}"
-        avg_stats, _, _ = run_evolution(
-            key=sigma_key,
+
+    ed_stats = None
+    alignment_data = None
+
+    # --- S5: sigma comparison across mutation strengths ---
+    if want_s5:
+        print(f"Running ED in {NF + NS}D (NF={NF}, NS={NS})...")
+        print(f"Comparing sigma values: {MUTATION_STD_VALUES}")
+        sigma_colors = get_colors_for_values(MUTATION_STD_VALUES)
+        sigma_color_map = {}
+        sigma_results = {}
+
+        for mutation_std, sigma_var, color in zip(MUTATION_STD_VALUES, SIGMA_VALUES, sigma_colors):
+            key, sigma_key = jax.random.split(key)
+            label = f"σ = {mutation_std:.2f}"
+            avg_stats, _, _ = simulate_evolution(
+                key=sigma_key,
+                initial_mean=initial_mean,
+                num_iterations=NUM_ITERATIONS,
+                population_size=POPULATION_SIZE,
+                sigma=sigma_var,
+                num_select=POPULATION_SIZE,
+                fitness_function=fitness_func,
+                hessian_func=hessian_func,
+                selection_method='linear',
+                beta=BETA,
+                track_hessian=True,
+                M=1
+            )
+            sigma_results[label] = avg_stats
+            sigma_color_map[label] = color
+
+        sigma_idx = len(SIGMA_VALUES) // 2
+        focus_label = f"σ = {MUTATION_STD_VALUES[sigma_idx]:.2f}"
+        fig = plot_high_dim_sigma_comparison(
+            results=sigma_results,
+            hessian_func=hessian_func,
+            color_map=sigma_color_map,
+            flat_k=NF,
+            sharp_k=NS,
+            focus_label=focus_label
+        )
+        save_figure(fig, f"high_dim_sigma_comparison_NF{NF}_NS{NS}_iter{NUM_ITERATIONS}", format='png')
+        print("[Done] S5: high-D sigma comparison generated!")
+
+    # --- S6: variance/curvature alignment for the middle sigma ---
+    if want_s6:
+        sigma_idx = len(SIGMA_VALUES) // 2
+        snapshot_times = list(range(NUM_ITERATIONS + 1))
+        key, snapshot_key = jax.random.split(key)
+        ed_stats, _, pop_snapshots = simulate_evolution_with_snapshots(
+            key=snapshot_key,
             initial_mean=initial_mean,
             num_iterations=NUM_ITERATIONS,
             population_size=POPULATION_SIZE,
-            sigma=sigma_var,
+            sigma=SIGMA_VALUES[sigma_idx],
             num_select=POPULATION_SIZE,
             fitness_function=fitness_func,
             hessian_func=hessian_func,
+            snapshot_times=snapshot_times,
             selection_method='linear',
             beta=BETA,
-            track_hessian=True,
-            M=1
+            track_hessian=True
         )
-        sigma_results[label] = avg_stats
-        sigma_color_map[label] = color
-    
-    snapshot_times = list(range(NUM_ITERATIONS + 1))
-    sigma_idx = len(SIGMA_VALUES) // 2
-    key, snapshot_key = jax.random.split(key)
-    ed_stats, _, pop_snapshots = run_evolution_with_snapshots(
-        key=snapshot_key,
-        initial_mean=initial_mean,
-        num_iterations=NUM_ITERATIONS,
-        population_size=POPULATION_SIZE,
-        sigma=SIGMA_VALUES[sigma_idx],
-        num_select=POPULATION_SIZE,
-        fitness_function=fitness_func,
-        hessian_func=hessian_func,
-        snapshot_times=snapshot_times,
-        selection_method='linear',
-        beta=BETA,
-        track_hessian=True
-    )
-    
-    focus_label = f"σ = {MUTATION_STD_VALUES[sigma_idx]:.2f}"
-    fig = plot_high_dim_sigma_comparison(
-        results=sigma_results,
-        hessian_func=hessian_func,
-        color_map=sigma_color_map,
-        flat_k=NF,
-        sharp_k=NS,
-        focus_label=focus_label
-    )
-    save_figure(fig, f"high_dim_sigma_comparison_NF{NF}_NS{NS}_iter{NUM_ITERATIONS}", format='png')
-    # Compute and plot covariance alignment with Hessian eigenvectors
-    print("Computing covariance-Hessian alignment...")
-    alignment_data = compute_covariance_hessian_alignment(
-        ed_statistics=ed_stats,
-        hessian_func=hessian_func,
-        flat_k=NF,   # Flat directions
-        sharp_k=NS,  # Sharp directions
-        population_snapshots=pop_snapshots
-    )
-    
-    plot_alignment_and_anticorrelation_summary(
-        alignment_data=alignment_data,
-        save_fig=True,
-        filename_prefix=f"alignment_anticorrelation_NF{NF}_NS{NS}_iter{NUM_ITERATIONS}"
-    )
-    
-    print("[Done] High-D ED fitness, curvature, and covariance alignment plots generated!")
+
+        print("Computing covariance-Hessian alignment...")
+        alignment_data = compute_covariance_hessian_alignment(
+            ed_statistics=ed_stats,
+            hessian_func=hessian_func,
+            flat_k=NF,
+            sharp_k=NS,
+            population_snapshots=pop_snapshots
+        )
+
+        plot_alignment_and_anticorrelation_summary(
+            alignment_data=alignment_data,
+            save_fig=True,
+            filename_prefix=f"alignment_anticorrelation_NF{NF}_NS{NS}_iter{NUM_ITERATIONS}"
+        )
+        print("[Done] S6: variance/curvature alignment generated!")
+
     return ed_stats, alignment_data
 
 
-def run_combined_mu_mutation():
+def generate_combined_mu_mutation_figure():
     """
     Figure 2 (Main Text): Mean Dynamics and Mutation Effects.
     
@@ -579,7 +515,7 @@ def run_combined_mu_mutation():
     
     key, mut_key = jax.random.split(key)
     print(f"Running mutation std comparison: {mutation_std_values}...")
-    mutation_results = run_mutation_std_comparison(
+    mutation_results = compare_mutation_std(
         key=mut_key,
         initial_mean=initial_mean_mut,
         num_iterations=NUM_ITERATIONS_MUT,
@@ -601,7 +537,7 @@ def run_combined_mu_mutation():
         sigma_var = mu_sigma**2
         key, ed_key = jax.random.split(key)
         print(f"Running ED for μ_t dynamics (σ={mu_sigma:.2f})...")
-        ed_stats, _, _ = run_evolution(
+        ed_stats, _, _ = simulate_evolution(
             key=ed_key,
             initial_mean=initial_mean_mu,
             num_iterations=NUM_ITERATIONS_MU,
@@ -616,7 +552,7 @@ def run_combined_mu_mutation():
             M=1
         )
         print(f"Computing theoretical μ_t trajectory (σ={mu_sigma:.2f})...")
-        theory_stats = run_manifold_dynamics_theoretical(
+        theory_stats = simulate_theoretical_manifold_dynamics(
             initial_mu=float(initial_mean_mu[0]),
             initial_a=sigma_var,
             initial_b=sigma_var,
@@ -651,16 +587,17 @@ def run_combined_mu_mutation():
     return ed_stats, theory_stats, mutation_results
 
 
-def run_ed_vs_multiplicative_nes():
+def generate_ed_vs_multiplicative_nes_figure():
     """
-    Figure S2 (Supplementary): ED (Multiplicative) vs NES on Log-Fitness.
-    
+    Figure S3 (Supplementary): ED (Multiplicative) vs NES on Log-Fitness.
+
     Compares ED with multiplicative selection to NES, demonstrating that
     multiplicative selection performs natural gradient ascent on log-expected
-    fitness rather than regular fitness.
+    fitness rather than regular fitness. Corresponds to the supplementary
+    figure labeled fig:EDvsTheory_multiplicative (NESvsMultipED.png).
     """
     print("\n" + "=" * 60)
-    print("Figure S2: ED (Multiplicative) vs NES on Log-Fitness")
+    print("Figure S3: ED (Multiplicative) vs NES on Log-Fitness")
     print("=" * 60)
     
     # Parameters
@@ -680,7 +617,7 @@ def run_ed_vs_multiplicative_nes():
     # Run ED with multiplicative selection (fitness-proportional)
     key, prop_key = jax.random.split(key)
     print("Running ED with multiplicative selection...")
-    ed_stats, ed_final_pop, ed_snapshots = run_evolution_with_snapshots(
+    ed_stats, ed_final_pop, ed_snapshots = simulate_evolution_with_snapshots(
         key=prop_key,
         initial_mean=initial_mean,
         num_iterations=max(SNAPSHOT_TIMES),
@@ -697,7 +634,7 @@ def run_ed_vs_multiplicative_nes():
     
     # Run Multiplicative NES (on log-fitness)
     print("Running Multiplicative NES (log-fitness)...")
-    mult_nes_stats = run_multiplicative_natural_gradient_es(
+    mult_nes_stats = simulate_multiplicative_natural_gradient_es(
         initial_mean=initial_mean,
         initial_std=MUTATION_STD,
         mutation_std=MUTATION_STD,
@@ -740,16 +677,17 @@ def run_ed_vs_multiplicative_nes():
     return ed_stats, mult_nes_stats
 
 
-def run_ed_vs_exponential_nes():
+def generate_ed_vs_exponential_nes_figure():
     """
-    Figure S3 (Supplementary): ED (Boltzmann) vs NES on Free Energy.
-    
+    Figure S4 (Supplementary): ED (Boltzmann) vs NES on Free Energy.
+
     Compares ED with Boltzmann/exponential selection W(x) = exp(F(x)/T) to NES,
     demonstrating natural gradient ascent on the Free Energy E = ln ⟨exp(F/T)⟩.
-    The temperature parameter T controls selection pressure.
+    The temperature parameter T controls selection pressure. Corresponds to the
+    supplementary figure labeled fig:EDvsTheory_boltzmann (NESvsBoltzmannED.png).
     """
     print("\n" + "=" * 60)
-    print("Figure S3: ED (Boltzmann) vs NES on Free Energy")
+    print("Figure S4: ED (Boltzmann) vs NES on Free Energy")
     print("=" * 60)
     
     # Parameters
@@ -770,7 +708,7 @@ def run_ed_vs_exponential_nes():
     # Run ED with Boltzmann (exponential) selection
     key, boltz_key = jax.random.split(key)
     print(f"Running ED with Boltzmann selection (T={TEMPERATURE})...")
-    ed_stats, ed_final_pop, ed_snapshots = run_evolution_with_snapshots(
+    ed_stats, ed_final_pop, ed_snapshots = simulate_evolution_with_snapshots(
         key=boltz_key,
         initial_mean=initial_mean,
         num_iterations=max(SNAPSHOT_TIMES),
@@ -788,7 +726,7 @@ def run_ed_vs_exponential_nes():
     # Run Exponential NES (on Free Energy)
     key, nes_key = jax.random.split(key)
     print(f"Running Exponential NES (Free Energy, T={TEMPERATURE})...")
-    exp_nes_stats = run_exponential_natural_gradient_es(
+    exp_nes_stats = simulate_exponential_natural_gradient_es(
         initial_mean=initial_mean,
         initial_std=MUTATION_STD,
         mutation_std=MUTATION_STD,
@@ -836,19 +774,25 @@ def run_ed_vs_exponential_nes():
     return ed_stats, exp_nes_stats
 
 
-# Map figure numbers to their functions and descriptions
+# Map figure numbers to their functions and descriptions.
+# Ordering matches the current manuscript and supplementary.
+# S5 and S6 share generate_high_dim_ed_figure but are gated by its `figures`
+# argument, so each entry runs only the simulations needed for its panel.
 FIGURES = {
     # Main text figures
-    '2': ('Fig 2: Mean dynamics and mutation effects', run_combined_mu_mutation),
-    '3': ('Fig 3: Theory vs empirical dynamics', run_theory_vs_empirical),
-    '4': ('Fig 4: ED vs GLD vs SGD populations', run_ed_gd_sgd),
+    '2': ('Fig 2: Mean dynamics and mutation effects', generate_combined_mu_mutation_figure),
+    '3': ('Fig 3: Theory vs empirical dynamics', generate_theory_vs_empirical_figure),
+    '4': ('Fig 4: ED vs GLD vs SGD populations', generate_ed_gd_sgd_figure),
     # Supplementary figures
-    'S1': ('Fig S1: ED vs Full NES', run_ed_vs_full_nes),
-    'S2': ('Fig S2: ED (Multiplicative) vs NES', run_ed_vs_multiplicative_nes),
-    'S3': ('Fig S3: ED (Boltzmann) vs NES', run_ed_vs_exponential_nes),
-    'S4': ('Fig S4: Steady-state histograms', run_steady_state_histogram),
-    'S5': ('Fig S5: High-D ED dynamics', run_high_dim_ed),
-    'S6': ('Fig S6: High-D steady-state histograms', run_high_dim_steady_state_histogram),
+    'S1': ('Fig S1: Curvature-drift vs genetic-drift transition (N sweep)',
+           generate_curvature_drift_transition_figure),
+    'S2': ('Fig S2: ED (Linear) vs NES', generate_ed_vs_full_nes_figure),
+    'S3': ('Fig S3: ED (Multiplicative) vs NES', generate_ed_vs_multiplicative_nes_figure),
+    'S4': ('Fig S4: ED (Boltzmann) vs NES', generate_ed_vs_exponential_nes_figure),
+    'S5': ('Fig S5: High-D ED sigma comparison',
+           partial(generate_high_dim_ed_figure, figures='s5')),
+    'S6': ('Fig S6: High-D variance/curvature alignment',
+           partial(generate_high_dim_ed_figure, figures='s6')),
 }
 
 # Keys for different figure groups
@@ -872,7 +816,7 @@ def list_figures():
     print("-" * 60)
 
 
-def run_figure(choice):
+def generate_figure(choice):
     """Run a single figure by its key."""
     if choice not in FIGURES:
         print(f"Invalid figure: {choice}")
@@ -885,22 +829,22 @@ def run_figure(choice):
     return True
 
 
-def run_main_figures():
+def generate_main_figures():
     """Reproduce all main text figures (2-4)."""
     for key in MAIN_FIGURES:
-        run_figure(key)
+        generate_figure(key)
 
 
-def run_supp_figures():
+def generate_supplementary_figures():
     """Reproduce all supplementary figures (S1-S6)."""
     for key in SUPP_FIGURES:
-        run_figure(key)
+        generate_figure(key)
 
 
-def run_all_figures():
+def generate_all_figures():
     """Reproduce all figures sequentially."""
     for key in ALL_FIGURES:
-        run_figure(key)
+        generate_figure(key)
 
 
 def interactive_mode():
@@ -913,13 +857,13 @@ def interactive_mode():
     choice = input("\nEnter choice: ").strip().lower()
     
     if choice == 'all':
-        run_all_figures()
+        generate_all_figures()
     elif choice == 'main':
-        run_main_figures()
+        generate_main_figures()
     elif choice == 'supp':
-        run_supp_figures()
+        generate_supplementary_figures()
     else:
-        run_figure(choice.upper() if choice.startswith('s') else choice)
+        generate_figure(choice.upper() if choice.startswith('s') else choice)
 
 
 def main():
@@ -938,7 +882,7 @@ Examples:
   python reproduce_figures.py              Interactive mode
         """
     )
-    parser.add_argument('--fig', '-f', type=str, 
+    parser.add_argument('--fig', '-f', type=str,
                         help='Figure to reproduce (2, 3, 4, S1-S6)')
     parser.add_argument('--main', action='store_true',
                         help='Reproduce all main text figures (2-4)')
@@ -961,15 +905,15 @@ Examples:
     if args.list:
         list_figures()
     elif args.all:
-        run_all_figures()
+        generate_all_figures()
     elif args.main:
-        run_main_figures()
+        generate_main_figures()
     elif args.supp:
-        run_supp_figures()
+        generate_supplementary_figures()
     elif args.fig:
         # Normalize figure key (e.g., 's1' -> 'S1')
         fig_key = args.fig.upper() if args.fig.lower().startswith('s') else args.fig
-        run_figure(fig_key)
+        generate_figure(fig_key)
     else:
         # Interactive mode
         interactive_mode()

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / agent metadata
+.claude/
+.cursor/
+.idea/
+.vscode/
+
+# Generated figures and simulation outputs
+figures/
+dominance_results/
+
+# OS
+.DS_Store

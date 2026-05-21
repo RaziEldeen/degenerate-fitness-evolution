@@ -5,10 +5,10 @@ This module contains pure algorithm implementations with no plotting dependencie
 All functions are JAX-compatible and many are JIT-compiled for performance.
 
 Main algorithms:
-- Evolutionary Dynamics (ED): `run_evolution`, `run_evolution_with_snapshots`
-- Gradient Descent: `run_gradient_descent`, `run_gradient_descent_population`
-- Theoretical dynamics: `run_manifold_dynamics_theoretical`
-- Full Natural Gradient ES: `run_full_natural_gradient_es`
+- Evolutionary Dynamics (ED): `simulate_evolution`, `simulate_evolution_with_snapshots`
+- Gradient Descent: `simulate_gradient_descent_population`
+- Theoretical dynamics: `simulate_theoretical_manifold_dynamics`
+- Full Natural Gradient ES: `simulate_full_natural_gradient_es`
 """
 
 import jax
@@ -179,7 +179,7 @@ def select_boltzmann(key: jax.Array, population: jax.Array, fitnesses: jax.Array
 # EVOLUTIONARY DYNAMICS
 # =============================================================================
 
-def run_evolution(
+def simulate_evolution(
     key: jax.Array,
     initial_mean: jax.Array,
     num_iterations: int,
@@ -421,7 +421,7 @@ def _run_evolution_single(
     return statistics, final_population
 
 
-def run_evolution_with_snapshots(
+def simulate_evolution_with_snapshots(
     key: jax.Array,
     initial_mean: jax.Array,
     num_iterations: int,
@@ -542,7 +542,7 @@ def run_evolution_with_snapshots(
     'num_iterations', 'fitness_function', 'grad_func', 
     'hessian_func', 'noise_type'
 ])
-def run_gradient_descent_population(
+def simulate_gradient_descent_population(
     key: jax.Array,
     initial_population: jax.Array,
     num_iterations: int,
@@ -554,7 +554,7 @@ def run_gradient_descent_population(
     noise_type: str = 'additive'
 ) -> Tuple[jax.Array, Tuple]:
     """
-    Run a population of independent gradient descent trajectories.
+    Simulate a population of independent gradient descent trajectories.
     
     Each individual in the population starts from the provided initial position
     and evolves independently following gradient descent with noise.
@@ -568,7 +568,13 @@ def run_gradient_descent_population(
         fitness_function: Fitness function
         grad_func: Gradient function
         hessian_func: Hessian function
-        noise_type: 'additive' for GD, 'shift' for SGD
+        noise_type: 'additive' for noisy-gradient dynamics
+                    x_{t+1} = x_t + eta * (grad F(x_t) + xi_t),
+                    where xi_t ~ N(0, Sigma);
+                    'langevin' for Euler-Maruyama Langevin dynamics
+                    x_{t+1} = x_t + eta * grad F(x_t) + sqrt(2 * eta) * xi_t,
+                    where xi_t ~ N(0, Sigma) (so the noise term has covariance 2 * eta * Sigma);
+                    'shift' for SGD (gradient evaluated at perturbed position).
     
     Returns:
         final_population: Array of final positions (population_size, dim)
@@ -581,7 +587,7 @@ def run_gradient_descent_population(
     # Split keys for trajectory evolution
     trajectory_keys = jax.random.split(key, population_size)
     
-    def run_single_trajectory(carry):
+    def simulate_single_trajectory(carry):
         traj_key, init_pos = carry
         
         def gd_step(state, _):
@@ -591,7 +597,15 @@ def run_gradient_descent_population(
             
             if noise_type == 'shift':
                 next_position = position + learning_rate * grad_func(position + noise)
-            else:  # additive
+            elif noise_type == 'langevin':
+                # Euler-Maruyama discretization of overdamped Langevin dynamics:
+                # noise covariance is 2 * eta * Sigma per step.
+                next_position = (
+                    position
+                    + learning_rate * grad_func(position)
+                    + jnp.sqrt(2.0 * learning_rate) * noise
+                )
+            else:  # additive (noisy-gradient)
                 next_position = position + learning_rate * (grad_func(position) + noise)
             
             new_state = (next_position, key)
@@ -604,7 +618,7 @@ def run_gradient_descent_population(
         return final_position, trajectory
     
     # Run all trajectories in parallel using vmap
-    final_positions, all_trajectories = jax.vmap(run_single_trajectory)((trajectory_keys, initial_population))
+    final_positions, all_trajectories = jax.vmap(simulate_single_trajectory)((trajectory_keys, initial_population))
     
     # Compute statistics (mean trajectory)
     mean_trajectory = jnp.mean(all_trajectories, axis=0)
@@ -633,7 +647,7 @@ def run_gradient_descent_population(
 # =============================================================================
 
 @partial(jax.jit, static_argnames=['num_iterations'])
-def run_manifold_dynamics_theoretical(
+def simulate_theoretical_manifold_dynamics(
     initial_mu: float,
     initial_a: float,
     initial_b: float,
@@ -781,7 +795,7 @@ def _run_natural_gradient_es_core(
 # FULL NATURAL GRADIENT ES
 # =============================================================================
 
-def run_full_natural_gradient_es(
+def simulate_full_natural_gradient_es(
     initial_mean: jax.Array,
     initial_std: float,
     mutation_std: float,
@@ -818,7 +832,7 @@ def run_full_natural_gradient_es(
 # MULTIPLICATIVE SELECTION NES (Log-Fitness)
 # =============================================================================
 
-def run_multiplicative_natural_gradient_es(
+def simulate_multiplicative_natural_gradient_es(
     initial_mean: jax.Array,
     initial_std: float,
     mutation_std: float,
@@ -881,7 +895,7 @@ def run_multiplicative_natural_gradient_es(
 # EXPONENTIAL (BOLTZMANN) SELECTION NES (Free Energy)
 # =============================================================================
 
-def run_exponential_natural_gradient_es(
+def simulate_exponential_natural_gradient_es(
     initial_mean: jax.Array,
     initial_std: float,
     mutation_std: float,

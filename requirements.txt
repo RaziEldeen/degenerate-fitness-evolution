@@ -1,5 +1,8 @@
-jax
-jaxlib
-numpy
-matplotlib
-seaborn
+# Minimum-tested versions for reproducing the figures in
+# "Evolution on degenerate fitness landscapes is not neutral".
+
+jax>=0.4.20
+jaxlib>=0.4.20
+numpy>=1.24
+matplotlib>=3.7
+seaborn>=0.12
